@@ -98,7 +98,17 @@ class ImplicitEulerSchema(Schema):
         diag_main_y = -2 * np.ones(Ny) / (dy**2)
         diag_off_y = np.ones(Ny-1) / (dy**2)
         Ly = diags([diag_off_y, diag_main_y, diag_off_y], [-1, 0, 1], shape=(Ny, Ny), format='csr')
-        
+
+        # # Applying non-permeability BC (remove or comment later)
+        # Lx[0, 0] = -1.0 / (dx**2)
+        # Lx[0, 1] = 1.0 / (dx**2)
+        # Lx[-1, -1] = -1.0 / (dx**2)
+        # Lx[-1, -2] = 1.0 / (dx**2)
+        # Ly[0, 0] = -1.0 / (dy**2)
+        # Ly[0, 1] = 1.0 / (dy**2)
+        # Ly[-1, -1] = -1.0 / (dy**2)
+        # Ly[-1, -2] = 1.0 / (dy**2)
+
         # 2D Laplacian: Lx ⊗ I + I ⊗ Ly
         Ix = eye(Nx, format='csr')
         Iy = eye(Ny, format='csr')
@@ -107,7 +117,8 @@ class ImplicitEulerSchema(Schema):
         
         # Identity matrix
         I = eye(Nx * Ny, format='csr')
-        
+
+
         # System matrix
         A = I - self.dt * self.diffusion_coefficient * L + self.dt * self.decay_rate * I
         

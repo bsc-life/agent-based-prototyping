@@ -8,7 +8,8 @@ using the Crank-Nicolson method.
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-from diffusion_schemas import CrankNicolsonSchema
+from diffusion_schemas import CrankNicolsonADISchema
+from diffusion_schemas.methods.crank_nicolson_ADI import CrankNicolsonADISchema
 from diffusion_schemas.utils import Agent, DirichletBC
 
 
@@ -31,7 +32,7 @@ def main():
     print("=" * 60)
     
     # Create schema
-    schema = CrankNicolsonSchema(
+    schema = CrankNicolsonADISchema(
         domain_size=(L, L),
         grid_points=(N, N),
         dt=dt,

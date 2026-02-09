@@ -53,7 +53,7 @@ class CrankNicolsonSchema(Schema):
         dt,
         diffusion_coefficient=1.0,
         decay_rate=0.0,
-        theta=0.5
+        theta=0.6
     ):
         """Initialize the Crank-Nicolson schema."""
         super().__init__(domain_size, grid_points, dt, diffusion_coefficient, decay_rate)
@@ -114,6 +114,16 @@ class CrankNicolsonSchema(Schema):
         diag_off_y = np.ones(Ny-1) / (dy**2)
         Ly = diags([diag_off_y, diag_main_y, diag_off_y], [-1, 0, 1], shape=(Ny, Ny), format='csr')
         
+        # # Applying non-permeability BC (remove or comment later)
+        # Lx[0, 0] = -1.0 / (dx**2)
+        # Lx[0, 1] = 1.0 / (dx**2)
+        # Lx[-1, -1] = -1.0 / (dx**2)
+        # Lx[-1, -2] = 1.0 / (dx**2)
+        # Ly[0, 0] = -1.0 / (dy**2)
+        # Ly[0, 1] = 1.0 / (dy**2)
+        # Ly[-1, -1] = -1.0 / (dy**2)
+        # Ly[-1, -2] = 1.0 / (dy**2)
+
         # 2D Laplacian
         Ix = eye(Nx, format='csr')
         Iy = eye(Ny, format='csr')

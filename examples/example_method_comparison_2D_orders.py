@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 import time
 from diffusion_schemas import ExplicitEulerSchema, ImplicitEulerSchema, CrankNicolsonSchema, ADISchema, CrankNicolsonADISchema
 from diffusion_schemas.utils import gaussian, NeumannBC
+from itertools import product
+
 
 
 def analytical_solution_2d(x, y, x0, y0, t, D):
@@ -25,19 +27,21 @@ def analytical_solution_2d(x, y, x0, y0, t, D):
     return amplitude * np.exp(-((x - x0)**2 + (y - y0)**2) / (2 * sigma_t**2))
 
 
-def run_comparison():
-    # Parameters
+def run_comparison(dt, dx):  
+
+    # Assume uniform spacing and same dt for all schemes
+
     L = (1.0, 1.0)
-    N = (100, 100)
+    N = (int(L[0]/dx), int(L[1]/dx))  # Adjust grid points based on dx
     D = 0.1
     t_final = 0.1
     
     # Different time steps for each method
-    dt_explicit = 0.00005  # Small for stability
-    dt_implicit = 0.00005    # Can be larger
-    dt_crank = 0.00005       # Can be larger
-    dt_adi = 0.00005         # Can be larger
-    dt_crank_adi = 0.00005   # Can be larger
+    dt_explicit = dt  # Small for stability
+    dt_implicit = dt    # Can be larger
+    dt_crank = dt       # Can be larger
+    dt_adi = dt         # Can be larger
+    dt_crank_adi = dt   # Can be larger
 
     print("=" * 70)
     print("Numerical Methods Comparison")
@@ -171,11 +175,11 @@ def run_comparison():
     u_analytical = analytical_solution_2d(X, Y, x0, y0, t_final, D)
     
     # Compute errors
-    error_explicit = np.linalg.norm(u_explicit - u_analytical) / np.linalg.norm(u_analytical)
-    error_implicit = np.linalg.norm(u_implicit - u_analytical) / np.linalg.norm(u_analytical)
-    error_crank = np.linalg.norm(u_crank - u_analytical) / np.linalg.norm(u_analytical)
-    error_adi = np.linalg.norm(u_adi - u_analytical) / np.linalg.norm(u_analytical)
-    error_crank_adi = np.linalg.norm(u_crank_adi - u_analytical) / np.linalg.norm(u_analytical)
+    error_explicit = np.sqrt(np.mean((u_explicit - u_analytical) ** 2))
+    error_implicit = np.sqrt(np.mean((u_implicit - u_analytical) ** 2))
+    error_crank = np.sqrt(np.mean((u_crank - u_analytical) ** 2))
+    error_adi = np.sqrt(np.mean((u_adi - u_analytical) ** 2))
+    error_crank_adi = np.sqrt(np.mean((u_crank_adi - u_analytical) ** 2))
     
     # Print summary
     print("\n" + "=" * 70)
@@ -190,6 +194,7 @@ def run_comparison():
     print(f"{'Crank-Nicolson ADI':<25} {dt_crank_adi:<12.6f} {steps_crank_adi:<8} {time_crank_adi:<12.4f} {error_crank_adi:<12.6e}")
     print("=" * 70)
     
+    """
     # Plot comparison
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     mid_y = N[1] // 2  # Index for the middle row to plot 1D slice example    
@@ -258,7 +263,7 @@ def run_comparison():
     plt.savefig('example_method_comparison_2D', dpi=150, bbox_inches='tight')
     print(f"\nPlot saved as 'example_method_comparison_2D.png'")
     plt.show()
-    
+    """
     """     
     print("\nKey Observations:")
     print("  • Explicit Euler requires small time steps for stability")
@@ -268,6 +273,55 @@ def run_comparison():
     print("  • Trade-off between step size, stability, and computational cost") 
     """
 
+    errors = np.array([error_explicit, error_implicit, error_crank, error_adi, error_crank_adi])
+    return errors
+
 
 if __name__ == "__main__":
-    run_comparison()
+
+    dx_values = np.array([0.1, 0.01, 0.001])
+    dt_values = np.array([0.005, 0.0005, 0.00005]) 
+
+    # Initialize a dictionary to store errors for each combination of dx and dt
+    error_data = {}
+
+    # Iterate over all combinations of dx and dt
+    for dx, dt in product(dx_values, dt_values):
+        print(f"\nRunning comparison with dx={dx:.3f} and dt={dt:.6f}")
+        errors = run_comparison(dx, dt)
+        error_data[(dx, dt)] = errors  # Store errors for this combination
+
+    # Prepare data for plotting convergence
+    methods = ['Explicit Euler', 'Implicit Euler', 'Crank-Nicolson', 'ADI', 'Crank-Nicolson ADI']
+    dx_dt_pairs = sorted(error_data.keys())  # Sort keys for consistent plotting
+    dx_values_sorted = sorted(set(dx for dx, dt in dx_dt_pairs))  # Unique sorted dx values
+    dt_values_sorted = sorted(set(dt for dx, dt in dx_dt_pairs))  # Unique sorted dt values
+
+    # Create a plot for convergence analysis
+    plt.figure(figsize=(12, 8))
+    for method_idx, method in enumerate(methods):
+        errors_for_method = [
+            error_data[(dx, dt)][method_idx] for dx, dt in dx_dt_pairs
+        ]
+        plt.plot(
+            range(len(dx_dt_pairs)),
+            errors_for_method,
+            label=f"{method}",
+            marker="o",
+        )
+
+    plt.xticks(
+        range(len(dx_dt_pairs)),
+        [f"dx={dx:.3f}, dt={dt:.6f}" for dx, dt in dx_dt_pairs],
+        rotation=45,
+        ha="right",
+    )
+    plt.yscale("log")
+    plt.xlabel("dx, dt combinations")
+    plt.ylabel("RMSE (log scale)")
+    plt.title("Convergence Analysis: RMSE for Different dx and dt Combinations")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("convergence_analysis.png", dpi=150, bbox_inches="tight")
+    print("\nConvergence analysis plot saved as 'convergence_analysis.png'")
+    plt.show()

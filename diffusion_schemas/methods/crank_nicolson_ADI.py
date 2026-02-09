@@ -68,11 +68,11 @@ class CrankNicolsonADISchema(Schema):
     def _build_system_matrices(self) -> None:
         """Build the sparse system matrices for the Crank-Nicolson scheme."""
         if self.ndim == 1:
-            self.A_impl, self.A_expl = self._build_matrices_1d()
+            self.A_impl_x = self._build_matrices_1d()
         elif self.ndim == 2:
-            self.A_impl, self.A_expl = self._build_matrices_2d()
+            self.A_impl_x, self.A_impl_y = self._build_matrices_2d()
         elif self.ndim == 3:
-            self.A_impl, self.A_expl = self._build_matrices_3d()
+            self.A_impl_x, self.A_impl_y, self.A_impl_z = self._build_matrices_3d()
         else:
             raise ValueError(f"Unsupported number of dimensions: {self.ndim}")
     
@@ -95,10 +95,12 @@ class CrankNicolsonADISchema(Schema):
                  self.theta * self.dt * self.decay_rate * I
         
         # Explicit side: I + (1-θ)*dt*D*L - (1-θ)*dt*λ*I
-        A_expl = I + (1 - self.theta) * self.dt * self.diffusion_coefficient * L - \
-                 (1 - self.theta) * self.dt * self.decay_rate * I
+        # A_expl = I + (1 - self.theta) * self.dt * self.diffusion_coefficient * L - \
+        #          (1 - self.theta) * self.dt * self.decay_rate * I
         
-        return A_impl, A_expl
+        self.Lx = L
+
+        return A_impl
     
     def _build_matrices_2d(self):
         """Build the 2D system matrices using Kronecker products."""
@@ -193,16 +195,24 @@ class CrankNicolsonADISchema(Schema):
         # (true CN would need to evaluate at n+1, but agents are at fixed positions)
         source_np1 = source_n  # Approximation
         
+        # Compute Explicit Part (Right-Hand Side)
+        # explicit_term = dt * (1-theta) * (D * Lap_n - decay * u_n)
+        explicit_term = self.step_explicit()
+
         # Right-hand side: A_expl * u^n + dt * θ * S^(n+1) + dt * (1-θ) * S^n
-        rhs = self.A_expl.dot(self.state.flatten()) + \
-              self.dt * self.theta * source_np1.flatten() + \
-              self.dt * (1 - self.theta) * source_n.flatten()
-        
+        # rhs = self.A_expl.dot(self.state.flatten()) + \
+        #       self.dt * self.theta * source_np1.flatten() + \
+        #       self.dt * (1 - self.theta) * source_n.flatten()
+        rhs_grid = self.state + explicit_term + self.dt * source_np1
+        if self._boundary_conditions is not None:
+            rhs_grid = self._apply_boundary_conditions(rhs_grid)
+
         # Solve the linear system: A_impl * u^(n+1) = rhs
-        u_new_flat = self.step_adi(rhs) # ADI step to solve the system more efficiently (split into x,y,z)
+        # ADI step to solve the system more efficiently (split into x,y,z)
+        u_new_grid = self.step_adi(rhs_grid) 
         
         # Reshape to grid
-        self.state = u_new_flat.reshape(self.grid_points)
+        self.state = u_new_grid
         
         # Apply boundary conditions
         if self._boundary_conditions is not None:
@@ -213,16 +223,38 @@ class CrankNicolsonADISchema(Schema):
 
     def step_explicit(self):
 
+        u = self.state  # Removed unnecessary reshape
         
-
-    def step_adi(self, rhs):
-        
+        # Compute Laplacian based on dimensions
         if self.ndim == 1:
-            # Solve the linear system A * u^(n+1) = rhs
-            Ax = self.A_impl_x
-            self.state = spsolve(Ax, rhs)
+            # 1D: Direct matrix-vector multiplication
+            # Lx is (N, N), u is (N,). Result is (N,)
+            laplacian = self.Lx.dot(u)
 
         elif self.ndim == 2:
+            # 2D: Lx acts on cols, Ly acts on rows
+            laplacian = self.Lx.dot(u) + self.Ly.dot(u.T).T
+
+        elif self.ndim == 3:
+            # 3D: Apply Lx, Ly, Lz to respective axes
+            Nx, Ny, Nz = self.grid_points
+            diff_x = self.Lx.dot(u.reshape(Nx, -1)).reshape(Nx, Ny, Nz)
+            diff_y = self.Ly.dot(u.transpose(1,0,2).reshape(Ny, -1)).reshape(Ny, Nx, Nz).transpose(1,0,2)
+            diff_z = self.Lz.dot(u.transpose(2,0,1).reshape(Nz, -1)).reshape(Nz, Nx, Ny).transpose(1,2,0)
+            laplacian = diff_x + diff_y + diff_z
+
+        # Crank-Nicolson Explicit Formula (Same for all dimensions)
+        # RHS = u^n + dt * (1-theta) * [ D * Laplacian(u) - decay * u ]
+        explicit_term = self.dt * (1 - self.theta) * (
+            self.diffusion_coefficient * laplacian - self.decay_rate * u
+        )  
+
+        return explicit_term
+
+    def step_adi(self, rhs):
+
+
+        if self.ndim == 2:
             Ax, Ay = self.A_impl_x, self.A_impl_y
             Nx, Ny = self.grid_points
             rhs = rhs.reshape(Nx,Ny)
@@ -266,7 +298,8 @@ class CrankNicolsonADISchema(Schema):
             # Reshape back to 3D and transpose back to original shape
             self.state = self.state.reshape(Nz, Nx, Ny).transpose(1,2,0)
 
-        return self.state.flatten()
+        # Fix return type in step_adi
+        return self.state  # Removed flatten to maintain grid shape
     
     def set_diffusion_coefficient(self, value: float) -> None:
         """
