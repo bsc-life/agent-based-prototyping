@@ -1,17 +1,9 @@
-"""
-Example 3: Comparison of Numerical Methods
-
-Compares the accuracy and stability of different numerical methods
-(Explicit Euler, Implicit Euler, Crank-Nicolson) on the same problem.
-"""
-
 import numpy as np
 import matplotlib.pyplot as plt
 import time
 from diffusion_schemas import ExplicitEulerSchema, ImplicitEulerSchema, CrankNicolsonSchema, ADISchema, CrankNicolsonADISchema
 from diffusion_schemas.utils import gaussian, NeumannBC
 from itertools import product
-
 
 
 def analytical_solution_2d(x, y, x0, y0, t, D):
@@ -27,7 +19,7 @@ def analytical_solution_2d(x, y, x0, y0, t, D):
     return amplitude * np.exp(-((x - x0)**2 + (y - y0)**2) / (2 * sigma_t**2))
 
 
-def run_comparison(dt, dx):  
+def run_comparison(dx, dt):  
 
     # Assume uniform spacing and same dt for all schemes
 
@@ -278,50 +270,78 @@ def run_comparison(dt, dx):
 
 
 if __name__ == "__main__":
-
-    dx_values = np.array([0.1, 0.01, 0.001])
-    dt_values = np.array([0.005, 0.0005, 0.00005]) 
-
+    dx_values = np.array([0.1, 0.075, 0.05, 0.025, 0.01])
+    dt_values = np.array([0.001, 0.0001, 0.00001, 0.000001])  
+    
     # Initialize a dictionary to store errors for each combination of dx and dt
     error_data = {}
 
     # Iterate over all combinations of dx and dt
     for dx, dt in product(dx_values, dt_values):
-        print(f"\nRunning comparison with dx={dx:.3f} and dt={dt:.6f}")
+        print(f"\nRunning comparison with dx={dx:.3f} and dt={dt:.0e}")
         errors = run_comparison(dx, dt)
         error_data[(dx, dt)] = errors  # Store errors for this combination
 
     # Prepare data for plotting convergence
-    methods = ['Explicit Euler', 'Implicit Euler', 'Crank-Nicolson', 'ADI', 'Crank-Nicolson ADI']
-    dx_dt_pairs = sorted(error_data.keys())  # Sort keys for consistent plotting
-    dx_values_sorted = sorted(set(dx for dx, dt in dx_dt_pairs))  # Unique sorted dx values
-    dt_values_sorted = sorted(set(dt for dx, dt in dx_dt_pairs))  # Unique sorted dt values
+    methods = [
+        # 'Explicit Euler',  # Commented out to exclude the explicit method
+        'Implicit Euler',
+        'Crank-Nicolson',
+        'ADI',
+        'Crank-Nicolson ADI'
+    ]
 
-    # Create a plot for convergence analysis
-    plt.figure(figsize=(12, 8))
+    # Create a figure with 4 subplots (2x2)
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    axes = axes.flatten()  # Flatten the 2x2 array of axes for easier indexing
+
+    # Define theoretical convergence orders for each method
+    theoretical_orders = {
+        'Implicit Euler': 1,  # First-order method
+        'Crank-Nicolson': 2,  # Second-order method
+        'ADI': 2,  # Second-order method
+        'Crank-Nicolson ADI': 2  # Second-order method
+    }
+
+    # Iterate over methods and create a subplot for each
     for method_idx, method in enumerate(methods):
-        errors_for_method = [
-            error_data[(dx, dt)][method_idx] for dx, dt in dx_dt_pairs
-        ]
-        plt.plot(
-            range(len(dx_dt_pairs)),
-            errors_for_method,
-            label=f"{method}",
-            marker="o",
+        ax = axes[method_idx]
+
+        # Plot error curves for each dt value
+        for dt in dt_values:
+            errors_for_dt = [
+                error_data[(dx, dt)][method_idx + 1]  # Adjusted index to skip explicit method
+                for dx in dx_values
+            ]
+            ax.plot(
+                dx_values,
+                errors_for_dt,
+                marker="o",
+                label=f"dt={dt:.0e}"
+            )
+
+        # Add theoretical convergence line
+        theoretical_order = theoretical_orders[method]
+        theoretical_errors = [dx**theoretical_order for dx in dx_values]
+        ax.plot(
+            dx_values,
+            theoretical_errors,
+            linestyle="--",
+            color="grey",
+            label=f"Theoretical (O(dx^{theoretical_order}))"
         )
 
-    plt.xticks(
-        range(len(dx_dt_pairs)),
-        [f"dx={dx:.3f}, dt={dt:.6f}" for dx, dt in dx_dt_pairs],
-        rotation=45,
-        ha="right",
-    )
-    plt.yscale("log")
-    plt.xlabel("dx, dt combinations")
-    plt.ylabel("RMSE (log scale)")
-    plt.title("Convergence Analysis: RMSE for Different dx and dt Combinations")
-    plt.legend()
+        # Set subplot labels and title
+        ax.set_xlabel("dx")
+        ax.set_ylabel("Error (RMSE)")
+        ax.set_title(f"{method}")
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+    # Adjust layout and save the figure
     plt.tight_layout()
-    plt.savefig("convergence_analysis.png", dpi=150, bbox_inches="tight")
-    print("\nConvergence analysis plot saved as 'convergence_analysis.png'")
+    plt.savefig("convergence_analysis_subplots_with_theoretical.png", dpi=150, bbox_inches="tight")
+    print("\nConvergence analysis plot saved as 'convergence_analysis_subplots_with_theoretical.png'")
     plt.show()

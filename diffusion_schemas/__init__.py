@@ -11,6 +11,11 @@ from diffusion_schemas.methods.implicit import ImplicitEulerSchema
 from diffusion_schemas.methods.crank_nicolson import CrankNicolsonSchema
 from diffusion_schemas.methods.implicit_ADI import ADISchema
 from diffusion_schemas.methods.crank_nicolson_ADI import CrankNicolsonADISchema
+from diffusion_schemas.methods_BC.explicit_euler import ExplicitEulerBCSchema
+from diffusion_schemas.methods_BC.implicit import ImplicitEulerBCSchema
+from diffusion_schemas.methods_BC.crank_nicolson import CrankNicolsonBCSchema
+from diffusion_schemas.methods_BC.implicit_ADI import ADIBCSchema
+from diffusion_schemas.methods_BC.crank_nicolson_ADI import CrankNicolsonADIBCSchema
 
 __version__ = "0.1.0"
 
@@ -20,5 +25,11 @@ __all__ = [
     "ImplicitEulerSchema",
     "CrankNicolsonSchema",
     "ADISchema",
-    "CrankNicolsonADISchema"
+    "CrankNicolsonADISchema",
+    
+    "ExplicitEulerBCSchema",
+    "ImplicitEulerBCSchema",
+    "CrankNicolsonBCSchema",
+    "ADIBCSchema",
+    "CrankNicolsonADIBCSchema"
 ]
