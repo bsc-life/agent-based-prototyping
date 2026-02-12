@@ -321,7 +321,7 @@ class ImplicitEulerBCSchema(Schema):
         """
 
     def _apply_neumann_bc(self, rhs):
-        flux = self._boundary_conditions._get_flux(self.t)
+        flux = self._boundary_conditions._get_flux(self.t + self.dt)
         D = self.diffusion_coefficient
         dt = self.dt
 
