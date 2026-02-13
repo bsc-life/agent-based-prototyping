@@ -80,3 +80,4 @@ examples/output/
 *.png
 *.gif
 *.mp4
+benchmark_results/
