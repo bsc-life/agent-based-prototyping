@@ -21,7 +21,8 @@ from benchmarking.error_metrics import (
 )
 from benchmarking.visualization import (
     plot_final_comparison, plot_error_distribution,
-    plot_time_evolution, plot_error_vs_time, plot_convergence_analysis
+    plot_time_evolution, plot_error_vs_time, plot_convergence_analysis,
+    plot_method_comparison
 )
 
 
@@ -121,6 +122,33 @@ class BenchmarkRunner:
                     print(f"  L2 error: {result['errors'].get('l2_relative', 'N/A'):.6e}")
                     print(f"  L∞ error: {result['errors'].get('linf_relative', 'N/A'):.6e}")
         
+        # New: storing final states for each schema for later comparison of single runs
+        if generate_plots:
+
+            # Group results by scenario
+            # Structure: grouped_results['ScenarioName'] = {'SchemaName': result_dict, ...}
+            grouped_results = defaultdict(dict)
+            for (schema_name, scenario_name), res in self.results.items():
+                grouped_results[scenario_name][schema_name] = res
+
+            # Loop through scenarios and plot if applicable
+            for sc_name, schema_dict in grouped_results.items():
+                # Only compare if we have multiple schemas
+                if len(schema_dict) > 1:
+                    
+                    # Check dimensions using the first available result
+                    first_res = list(schema_dict.values())[0]
+                    final_state = first_res['final_state']
+                
+                    print(f"\nGenerating comparison plot for: {sc_name}")
+                    print("-" * 70)
+
+                    fig_path = output_dir / sc_name / "method_comparison.png"
+                    plot_method_comparison(sc_name, schema_dict, fig_path)
+                    
+                    for res in schema_dict.values():
+                        res['figures'].append(str(fig_path))
+
         print("\n" + "=" * 70)
         print("Benchmark complete!")
         
@@ -180,20 +208,26 @@ class BenchmarkRunner:
         # Get final state
         final_state = schema.get_state()
         
-        # Evaluate golden solution at final time
-        golden_solution = built_scenario['golden_solution']
-        coordinates = schema._create_coordinate_grids()
+        if 'golden_solution' in built_scenario and built_scenario['golden_solution'] is not None:
+
+            # Evaluate golden solution at final time
+            golden_solution = built_scenario['golden_solution']
+            coordinates = schema._create_coordinate_grids()
+            
+            if hasattr(golden_solution, 'evaluate'):
+                analytical_final = golden_solution.evaluate(coordinates, scenario['t_final'])
+            else:
+                analytical_final = golden_solution(coordinates, scenario['t_final'])
+            
+            # Compute errors
+            errors = compute_all_errors(
+                final_state, analytical_final, 
+                dx=schema.dx, initial_mass=initial_mass
+            )
         
-        if hasattr(golden_solution, 'evaluate'):
-            analytical_final = golden_solution.evaluate(coordinates, scenario['t_final'])
         else:
-            analytical_final = golden_solution(coordinates, scenario['t_final'])
-        
-        # Compute errors
-        errors = compute_all_errors(
-            final_state, analytical_final, 
-            dx=schema.dx, initial_mass=initial_mass
-        )
+            analytical_final = None
+            errors = {}
         
         # Prepare result
         result = {
@@ -344,7 +378,8 @@ class BenchmarkRunner:
                 if isinstance(refinement, int):
                     h_value = domain_size / (refinement - 1)
                 else:
-                    h_value = domain_size[0] / (refinement[0] - 1)
+                    h_value = domain_size[0] / (refinement[0] - 1) 
+                    # h_value = domain_size[0] / (refinement - 1)
             
             print(f"\n  Testing with {refinement_type}={refinement}")
             
@@ -438,7 +473,7 @@ class BenchmarkRunner:
                 'Scenario': scenario_name,
                 'Duration (s)': result['duration'],
                 'L2 Error': result['errors'].get('l2_relative', np.nan),
-                'L∞ Error': result['errors'].get('linf_relative', np.nan),
+                'Linf Error': result['errors'].get('linf_relative', np.nan),
             }
             
             if 'mass_conservation_relative' in result['errors']:

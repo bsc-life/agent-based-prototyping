@@ -8,6 +8,7 @@ and time evolution.
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.colors as colors
 from matplotlib import cm
 from pathlib import Path
 from typing import List, Tuple, Union, Dict, Any
@@ -629,3 +630,95 @@ def plot_convergence_analysis(refinements: List[float],
         fig.savefig(output_path, dpi=150, bbox_inches='tight')
     
     return fig
+
+def plot_method_comparison(scenario_name, schema_dict, output_path):
+        
+        # Grab analytical solution from the first result (it's the same for all)
+        first_res = list(schema_dict.values())[0]
+        analytical = first_res['analytical_final']
+        ndim = analytical.ndim
+        
+        # Reconstruct x-axis (assuming generic domain [0, 1] if coords aren't saved)
+        # If you saved 'coordinates' in result, use that instead.
+
+        if ndim == 1:
+            fig, (ax1, ax2) = plt.subplots(1,2, figsize=(10, 8), sharex=True)
+
+            nx = len(analytical)
+            x = np.linspace(0, 1, nx) 
+            
+            # Plot Analytical
+            ax1.plot(x, analytical, 'k--', label='Analytical', alpha=0.6)
+            
+            for schema_name, res in schema_dict.items():
+                u_num = res['final_state']
+                error = np.abs(u_num - analytical)
+                
+                ax1.plot(x, u_num, label=schema_name)
+                ax2.semilogy(x, error, label=schema_name) # Log scale for error
+                
+            ax1.legend()
+            ax1.set_ylabel("Concentration")
+            ax1.set_xlabel("x")
+            ax2.set_ylabel("Pointwise Error (Log)")
+            ax2.legend()
+            ax2.set_xlabel("x")
+
+            plt.tight_layout()
+
+
+        elif ndim == 2:
+            # We plot n_schemas + 1 subplots (Analytical + each schema's error)
+            n_plots = len(schema_dict) + 1
+            fig, axes = plt.subplots(1, n_plots, figsize=(4 * n_plots, 4), constrained_layout=True)
+            
+            if n_plots == 1: axes = [axes] # Handle edge case
+            
+            # 1. Plot Analytical Solution (First panel)
+            im0 = axes[0].imshow(analytical.T, origin='lower', cmap='viridis')
+            axes[0].set_title("Analytical Solution")
+            axes[0].set_xlabel("x")
+            axes[0].set_ylabel("y")
+            fig.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
+            
+            # Determine global max error for consistent color scaling across methods
+            global_max_err = 0
+            for res in schema_dict.values():
+                err = np.abs(res['final_state'] - analytical)
+                global_max_err = max(global_max_err, np.max(err))
+                global_min_err = 1e-16
+                if np.any(err > 0):
+                    global_min_err = min(global_min_err, np.min(err[err > 0]))
+                
+            # 2. Plot Error Heatmaps for each method
+            for ax, (schema_name, res) in zip(axes[1:], schema_dict.items()):
+                u_num = res['final_state']
+                error = np.abs(u_num - analytical)
+                
+                # Use 'inferno' for error to highlight hotspots
+                # im = ax.imshow(error, origin='lower', cmap='inferno', 
+                #             norm=colors.LogNorm(vmin=max(global_min_err, 1e-16), 
+                #                                vmax=global_max_err))
+                
+                im = ax.imshow(error.T, origin='lower', cmap='inferno', 
+                               vmin = 0, vmax=global_max_err)
+                
+                ax.set_title(f"Error: {schema_name}\nMax: {np.max(error):.2e}")
+                ax.set_xlabel("x")
+                ax.set_yticks([]) # Hide Y ticks for inner plots to save space
+                
+                # Individual colorbar or shared? Individual is safer if scales differ wildly,
+                # but shared (using vmin/vmax) allows visual comparison.
+                fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+        else:
+            print(f"Skipping plot: Dimensionality {ndim} not supported for comparison.")
+            return None
+        
+        if fig is not None:
+            fig.suptitle(f"Final state comparison: {scenario_name}", fontsize=14, fontweight='bold')
+            plt.savefig(output_path)
+            plt.close() 
+
+        return fig
+

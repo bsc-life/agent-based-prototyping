@@ -27,7 +27,9 @@ from benchmarking import (
 # Schema imports
 from diffusion_schemas import (
     ExplicitEulerSchema, ImplicitEulerSchema, CrankNicolsonSchema,
-    ADISchema, CrankNicolsonADISchema
+    ADISchema, CrankNicolsonADISchema,
+    ExplicitEulerBCSchema, ImplicitEulerBCSchema, CrankNicolsonBCSchema,
+    ADIBCSchema, CrankNicolsonADIBCSchema
 )
 
 # Utilities for backward compatibility example
@@ -51,7 +53,9 @@ def run_basic_benchmark():
     # Add schemas to test
     runner.add_schema(ExplicitEulerSchema, "Explicit Euler")
     runner.add_schema(ImplicitEulerSchema, "Implicit Euler")
+    runner.add_schema(ADISchema, "ADI")
     runner.add_schema(CrankNicolsonSchema, "Crank-Nicolson")
+    runner.add_schema(CrankNicolsonADISchema, "Crank-Nicolson ADI")
     
     # Add default 2D Gaussian pulse scenario
     scenario = get_scenario_by_name('gaussian_pulse_2d')
@@ -85,7 +89,9 @@ def run_1d_benchmark():
     # Add schemas
     runner.add_schema(ExplicitEulerSchema, "Explicit Euler")
     runner.add_schema(ImplicitEulerSchema, "Implicit Euler")
+    runner.add_schema(ADISchema, "ADI")
     runner.add_schema(CrankNicolsonSchema, "Crank-Nicolson")
+    runner.add_schema(CrankNicolsonADISchema, "Crank-Nicolson ADI")
     
     # Add 1D scenario
     scenario = get_scenario_by_name('gaussian_pulse_1d')
@@ -93,17 +99,16 @@ def run_1d_benchmark():
     
     # Run
     results = runner.run(
-        output_dir='benchmark_results/1d',
+        output_dir='benchmark_results/basic_1d',
         store_history=True,
         generate_plots=True
     )
     
     summary = runner.generate_summary_report(
-        output_path='benchmark_results/1d/summary.csv'
+        output_path='benchmark_results/basic_1d/summary.csv'
     )
     
     return results, summary
-
 
 def run_convergence_analysis():
     """
@@ -119,7 +124,7 @@ def run_convergence_analysis():
     runner = BenchmarkRunner()
     
     # Get base scenario
-    scenario = get_scenario_by_name('gaussian_pulse_1d')
+    scenario = get_scenario_by_name('gaussian_pulse_2d')
     
     # Test temporal convergence for Crank-Nicolson (should be 2nd order)
     print("\nTemporal convergence for Crank-Nicolson:")
@@ -129,7 +134,7 @@ def run_convergence_analysis():
         scenario_base=scenario,
         refinement_type='dt',
         refinement_factors=[0.01, 0.005, 0.0025, 0.00125],
-        output_dir='benchmark_results/convergence'
+        output_dir='benchmark_results/convergence_2D'
     )
     
     # Test temporal convergence for Implicit Euler (should be 1st order)
@@ -140,11 +145,70 @@ def run_convergence_analysis():
         scenario_base=scenario,
         refinement_type='dt',
         refinement_factors=[0.01, 0.005, 0.0025, 0.00125],
-        output_dir='benchmark_results/convergence'
+        output_dir='benchmark_results/convergence_2D'
+    )
+
+    print("\nTemporal convergence for ADI:")
+    conv_results_adi = runner.run_convergence_analysis(
+        schema_class=ADISchema,
+        schema_name="ADI",
+        scenario_base=scenario,
+        refinement_type='dt',
+        refinement_factors=[0.01, 0.005, 0.0025, 0.00125],
+        output_dir='benchmark_results/convergence_2D'
     )
     
-    return conv_results_cn, conv_results_ie
+    return conv_results_cn, conv_results_ie, conv_results_adi
 
+def run_convergence_analysis_spatial():
+    """
+    Example 3: Convergence analysis to verify order of accuracy.
+    
+    This tests how error decreases as dx is refined, confirming that
+    methods achieve their expected convergence rates.
+    """
+    print("\n" + "=" * 70)
+    print("EXAMPLE 3: Convergence Analysis")
+    print("=" * 70)
+    
+    runner = BenchmarkRunner()
+    
+    # Get base scenario
+    scenario = get_scenario_by_name('gaussian_pulse_1d')
+    
+    # Test spatial convergence for Crank-Nicolson (should be 2nd order)
+    print("\nSpatial convergence for Crank-Nicolson:")
+    conv_results_cn = runner.run_convergence_analysis(
+        schema_class=CrankNicolsonSchema,
+        schema_name="Crank-Nicolson",
+        scenario_base=scenario,
+        refinement_type='dx',
+        refinement_factors=None,
+        output_dir='benchmark_results/convergence_2D_spatial'
+    )
+    
+    # Test spatial convergence for Implicit Euler (should be 1st order)
+    print("\nSpatial convergence for Implicit Euler:")
+    conv_results_ie = runner.run_convergence_analysis(
+        schema_class=ImplicitEulerSchema,
+        schema_name="Implicit Euler",
+        scenario_base=scenario,
+        refinement_type='dx',
+        refinement_factors=None,
+        output_dir='benchmark_results/convergence_2D_spatial'
+    )
+
+    print("\nSpatial convergence for ADI:")
+    conv_results_adi = runner.run_convergence_analysis(
+        schema_class=ADISchema,
+        schema_name="ADI",
+        scenario_base=scenario,
+        refinement_type='dx',
+        refinement_factors=None,
+        output_dir='benchmark_results/convergence_2D_spatial'
+    )
+    
+    return conv_results_cn, conv_results_ie, conv_results_adi
 
 def run_custom_scenario():
     """
@@ -188,7 +252,10 @@ def run_custom_scenario():
     
     # Test with ADI method (efficient for 2D)
     runner = BenchmarkRunner()
+    runner.add_schema(ExplicitEulerSchema, "Explicit Euler")
+    runner.add_schema(ImplicitEulerSchema, "Implicit Euler")
     runner.add_schema(ADISchema, "ADI")
+    runner.add_schema(CrankNicolsonSchema, "Crank-Nicolson")
     runner.add_schema(CrankNicolsonADISchema, "Crank-Nicolson ADI")
     runner.add_scenario(custom_scenario)
     
@@ -204,6 +271,66 @@ def run_custom_scenario():
     
     return results, summary
 
+def run_step_function_1d():
+    
+    print("\n" + "=" * 70)
+    print("EXAMPLE 8a: Step Function 1D")
+    print("=" * 70)
+
+    step_function_1d = get_scenario_by_name('step_function_1d')  # Alternatively, retrieve from registry
+
+    runner = BenchmarkRunner()
+
+    runner.add_schema(ExplicitEulerBCSchema, "Explicit Euler")
+    runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
+    runner.add_schema(ADIBCSchema, "ADI")
+    runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
+    runner.add_schema(CrankNicolsonADIBCSchema, "Crank-Nicolson ADI")
+
+    runner.add_scenario(step_function_1d)
+    
+    results = runner.run(
+        output_dir='benchmark_results/step_function_1d_bc',
+        store_history=True,
+        generate_plots=True
+    )
+    
+    summary = runner.generate_summary_report(
+        output_path='benchmark_results/step_function_1d_BC/summary.csv'
+    )
+    
+    return results, summary
+
+
+def run_step_function_2d():
+    
+    print("\n" + "=" * 70)
+    print("EXAMPLE 8b: Step Function 2D")
+    print("=" * 70)
+
+    step_function_2d = get_scenario_by_name('step_function_2d')  # Alternatively, retrieve from registry
+
+    runner = BenchmarkRunner()
+
+    runner.add_schema(ExplicitEulerSchema, "Explicit Euler")
+    runner.add_schema(ImplicitEulerSchema, "Implicit Euler")
+    runner.add_schema(ADISchema, "ADI")
+    runner.add_schema(CrankNicolsonSchema, "Crank-Nicolson")
+    runner.add_schema(CrankNicolsonADISchema, "Crank-Nicolson ADI")
+
+    runner.add_scenario(step_function_2d)
+    
+    results = runner.run(
+        output_dir='benchmark_results/step_function_2d',
+        store_history=True,
+        generate_plots=True
+    )
+    
+    summary = runner.generate_summary_report(
+        output_path='benchmark_results/step_function_2d/summary.csv'
+    )
+    
+    return results, summary
 
 def run_all_dimensions():
     """
@@ -325,13 +452,16 @@ def main():
     print("=" * 70)
     
     # Example 1: Basic benchmark (recommended starting point)
-    results1, summary1 = run_basic_benchmark()
+    # results1, summary1 = run_basic_benchmark()
     
     # Example 2: 1D benchmark (faster, good for testing)
     # results2, summary2 = run_1d_benchmark()
     
     # Example 3: Convergence analysis (verifies order of accuracy)
-    # conv_cn, conv_ie = run_convergence_analysis()
+    # conv_cn, conv_ie, conv_adi = run_convergence_analysis()
+
+    # Examle 3b: Spatial convergence analysis
+    # conv_cn_spatial, conv_ie_spatial, conv_adi_spatial = run_convergence_analysis_spatial()
     
     # Example 4: Custom scenario
     # results4, summary4 = run_custom_scenario()
@@ -344,7 +474,11 @@ def main():
     
     # Example 7: ValidationScenario
     # results7 = run_validation_scenario_example()
-    
+
+    # Example 8: Step functions
+    results8, summary8 = run_step_function_1d()
+    # results8, summary8 = run_step_function_2d()
+
     print("\n" + "=" * 70)
     print("All examples completed!")
     print("Check the 'benchmark_results' directory for outputs.")

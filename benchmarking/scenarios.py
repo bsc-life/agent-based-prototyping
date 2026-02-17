@@ -15,7 +15,7 @@ from diffusion_schemas.utils.boundary import (
 )
 from diffusion_schemas.utils.agents import Agent
 from benchmarking.golden_solutions import (
-    GoldenSolution, GaussianDiffusion1D, GaussianDiffusion2D, GaussianDiffusion3D,
+    GoldenSolution, GaussianDiffusion1D, GaussianDiffusion2D, GaussianDiffusion3D, StepFunctionDiffusion1D,
     create_golden_solution_from_dict
 )
 
@@ -428,6 +428,84 @@ GAUSSIAN_PULSE_3D = {
     }
 }
 
+# We need to define a new golden solution for the step function case
+STEP_FUNCTION_1D = {
+    'name': 'step_function_1d',
+    'description': '1D step diffusion with zero-flux boundaries',
+    
+    'domain_size': 1.0,
+    'grid_points': 500,
+    'dt': 0.00005,
+    't_final': 0.2,
+    
+    'diffusion_coefficient': 0.01,
+    'decay_rate': 0.0,
+    
+    'initial_condition': {
+        'type': 'step_function',
+        'position': 0.5,
+        'value_left': 1.0,
+        'value_right': 0.0,
+        'axis' : 0
+    },
+    
+    'boundary_condition': {
+        'type': 'neumann',
+        'flux': 0.0
+    },
+    
+    'agents': None, 
+
+    'golden_solution': {
+            'type': 'step_function_1d',   # Matches the key in your factory
+            'domain_length': 1.0,         # Should match domain_size above
+            'position': 0.5,              # Where the step occurs (x0)
+            'value_left': 1.0,            # u value for x < x0
+            'value_right': 0.0,           # u value for x >= x0
+            'axis': 0,                    # Axis (0=x)
+            'diffusion_coefficient': 0.01, # Must match outer diffusion_coefficient
+            'n_terms': 200                # Accuracy of analytical solution
+        }
+}
+
+STEP_FUNCTION_2D = {
+    'name': 'step_function_2d',
+    'description': '2D step diffusion with zero-flux boundaries',
+    
+    'domain_size': (1.0, 1.0),
+    'grid_points': (50, 50),
+    'dt': 0.0005,
+    't_final': 0.2,
+    
+    'diffusion_coefficient': 0.01,
+    'decay_rate': 0.0,
+    
+    'initial_condition': {
+        'type': 'step_function',
+        'position': 0.5,
+        'value_left': 1.0,
+        'value_right': 0.0,
+        'axis' : 0
+    },
+    
+    'boundary_condition': {
+        'type': 'neumann',
+        'flux': 0.0
+    },
+    
+    'agents': None, 
+
+    'golden_solution': {
+            'type': 'step_function_1d',   # Matches the key in your factory
+            'domain_length': 1.0,         # Should match domain_size above
+            'position': 0.5,              # Where the step occurs (x0)
+            'value_left': 1.0,            # u value for x < x0
+            'value_right': 0.0,           # u value for x >= x0
+            'axis': 0,                    # Axis (0=x)
+            'diffusion_coefficient': 0.01, # Must match outer diffusion_coefficient
+            'n_terms': 200                # Accuracy of analytical solution
+        }
+}
 
 def get_default_scenarios() -> List[Dict[str, Any]]:
     """
@@ -467,10 +545,13 @@ def get_scenario_by_name(name: str) -> Dict[str, Any]:
     scenarios = {
         'gaussian_pulse_1d': GAUSSIAN_PULSE_1D,
         'gaussian_pulse_2d': GAUSSIAN_PULSE_2D,
-        'gaussian_pulse_3d': GAUSSIAN_PULSE_3D
+        'gaussian_pulse_3d': GAUSSIAN_PULSE_3D,
+        'step_function_1d': STEP_FUNCTION_1D,
+        'step_function_2d': STEP_FUNCTION_2D
     }
     
     if name not in scenarios:
         raise ValueError(f"Unknown scenario: {name}. Available: {list(scenarios.keys())}")
     
     return scenarios[name]
+
