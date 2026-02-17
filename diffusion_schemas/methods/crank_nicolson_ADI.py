@@ -253,8 +253,13 @@ class CrankNicolsonADISchema(Schema):
 
     def step_adi(self, rhs):
 
+        # Theta proportion is already accounted for in the system matrices
+        # We just solve the linear system using ADI splitting.
 
-        if self.ndim == 2:
+        if self.ndim == 1:
+            self.state = spsolve(self.A_impl_x, rhs)
+
+        elif self.ndim == 2:
             Ax, Ay = self.A_impl_x, self.A_impl_y
             Nx, Ny = self.grid_points
             rhs = rhs.reshape(Nx,Ny)
