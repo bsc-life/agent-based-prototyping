@@ -7,7 +7,7 @@ from diffusion_schemas import ImplicitEulerBCSchema, ImplicitEulerSchema, \
     CrankNicolsonBCSchema, CrankNicolsonSchema, \
     ADIBCSchema, ADISchema,\
     CrankNicolsonADIBCSchema, CrankNicolsonADISchema
-from diffusion_schemas.utils import gaussian, NeumannBC
+from diffusion_schemas.utils import gaussian, NeumannBC, DirichletBC
 
 def main():
     # Parameters
@@ -18,7 +18,7 @@ def main():
     D = 0.1        # Diffusion coefficient
     # dt = 0.005     # Larger time step (Implicit is stable!)
     # dt_threshold = dx ** 2 / (2 * D)
-    dt = 0.00001     # Smaller time step (Explicit is conditionally stable!)
+    dt = 0.000001     # Smaller time step (Explicit is conditionally stable!)
 
     t_final = 0.1  # Final time
     
@@ -39,11 +39,13 @@ def main():
     }
 
     methods2 = {
-        "Explicit (Integrated - BC)": ExplicitEulerBCSchema(
-            domain_size=L, grid_points=N, dt=dt, diffusion_coefficient=D
+        "Explicit (Forward)": ExplicitEulerSchema(
+            domain_size=L, grid_points=N, dt=dt, diffusion_coefficient=D,
+            spatial_discretization='forward_1'
         ),
-        "Explicit (Operator Splitting - BC)": ExplicitEulerSchema(
-            domain_size=L, grid_points=N, dt=dt, diffusion_coefficient=D
+        "Explicit (Backward)": ExplicitEulerSchema(
+            domain_size=L, grid_points=N, dt=dt, diffusion_coefficient=D,
+            spatial_discretization='backward_1'
         )
     }
 
@@ -77,14 +79,16 @@ def main():
     results = {}
     stats = []
 
-    for name, schema in methods5.items():
+    for name, schema in methods2.items():
         print(f"Running {name}...")
         
         # Setup
         schema.set_initial_condition(ic)
         u_initial = methods["Implicit (Integrated - BC)"].get_state()  # Get initial state from one of the schemas
-        schema.set_boundary_conditions(NeumannBC(flux=0.0))
-        
+        # schema.set_boundary_conditions(NeumannBC(flux=0.0))
+        schema.set_boundary_conditions(DirichletBC(value=0.0))
+
+
         # Solve
         start_time = time.time()
         schema.solve(t_final=t_final)
@@ -111,12 +115,12 @@ def main():
 
 
     # --- Print Statistics Table ---
-    print("\n" + "="*50)
+    print("\n" + "="*70)
     print("Comparison")
-    print("="*50)
+    print("="*70)
     df = pd.DataFrame(stats).set_index("Method")
     print(df.transpose()) # Transposed for easier side-by-side reading
-    print("="*50)
+    print("="*70)
 
     # --- Plotting 2D Maps ---
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
@@ -129,6 +133,7 @@ def main():
         fig.colorbar(im, ax=ax, label='Concentration u', fraction=0.046, pad=0.04)
 
     plt.tight_layout()
+    
     plt.savefig('comparison_2d_diffusion.png', dpi=150)
     print(f"\nPlot saved as 'comparison_2d_diffusion.png'")
     plt.show()
