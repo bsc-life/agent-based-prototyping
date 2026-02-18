@@ -447,9 +447,93 @@ class CrankNicolsonBCSchema(Schema):
                                         (u[1:-1,2:,-1]-2*u[1:-1,1:-1,-1]+u[1:-1,:-2,-1])/dy**2 + \
                                         (2*(u[1:-1,1:-1,-2]-u[1:-1,1:-1,-1])/dz**2 + 2*flux/dz)
             
-            # NOTE: For brevity, the edges (12) and corners (8) are omitted here but
-            # SHOULD be copied identically from your ExplicitEulerBCSchema._laplacian_3d
-            # if you need full 3D corner accuracy.
+            # EDGES
+            # 1. Front-Bottom Edge (y=0, z=0)
+            laplacian[1:-1, 0, 0] = (u[2:,0,0]-2*u[1:-1,0,0]+u[:-2,0,0])/dx**2 + \
+                                    (2*(u[1:-1,1,0]-u[1:-1,0,0])/dy**2 - 2*flux/dy) + \
+                                    (2*(u[1:-1,0,1]-u[1:-1,0,0])/dz**2 - 2*flux/dz)
+            # 2. Front-Top Edge (y=0, z=-1)
+            laplacian[1:-1, 0, -1] = (u[2:,0,-1]-2*u[1:-1,0,-1]+u[:-2,0,-1])/dx**2 + \
+                                     (2*(u[1:-1,1,-1]-u[1:-1,0,-1])/dy**2 - 2*flux/dy) + \
+                                     (2*(u[1:-1,0,-2]-u[1:-1,0,-1])/dz**2 + 2*flux/dz)
+            # 3. Back-Bottom Edge (y=-1, z=0)
+            laplacian[1:-1, -1, 0] = (u[2:,-1,0]-2*u[1:-1,-1,0]+u[:-2,-1,0])/dx**2 + \
+                                     (2*(u[1:-1,-2,0]-u[1:-1,-1,0])/dy**2 + 2*flux/dy) + \
+                                     (2*(u[1:-1,-1,1]-u[1:-1,-1,0])/dz**2 - 2*flux/dz)
+            # 4. Back-Top Edge (y=-1, z=-1)
+            laplacian[1:-1, -1, -1] = (u[2:,-1,-1]-2*u[1:-1,-1,-1]+u[:-2,-1,-1])/dx**2 + \
+                                      (2*(u[1:-1,-2,-1]-u[1:-1,-1,-1])/dy**2 + 2*flux/dy) + \
+                                      (2*(u[1:-1,-1,-2]-u[1:-1,-1,-1])/dz**2 + 2*flux/dz)
+
+            # Edges parallel to Y-axis (x=0, x=-1, z=0, z=-1)
+            # 5. Left-Bottom Edge (x=0, z=0)
+            laplacian[0, 1:-1, 0] = (2*(u[1,1:-1,0]-u[0,1:-1,0])/dx**2 - 2*flux/dx) + \
+                                    (u[0,2:,0]-2*u[0,1:-1,0]+u[0,:-2,0])/dy**2 + \
+                                    (2*(u[0,1:-1,1]-u[0,1:-1,0])/dz**2 - 2*flux/dz)
+            # 6. Left-Top Edge (x=0, z=-1)
+            laplacian[0, 1:-1, -1] = (2*(u[1,1:-1,-1]-u[0,1:-1,-1])/dx**2 - 2*flux/dx) + \
+                                     (u[0,2:,-1]-2*u[0,1:-1,-1]+u[0,:-2,-1])/dy**2 + \
+                                     (2*(u[0,1:-1,-2]-u[0,1:-1,-1])/dz**2 + 2*flux/dz)
+            # 7. Right-Bottom Edge (x=-1, z=0)
+            laplacian[-1, 1:-1, 0] = (2*(u[-2,1:-1,0]-u[-1,1:-1,0])/dx**2 + 2*flux/dx) + \
+                                     (u[-1,2:,0]-2*u[-1,1:-1,0]+u[-1,:-2,0])/dy**2 + \
+                                     (2*(u[-1,1:-1,1]-u[-1,1:-1,0])/dz**2 - 2*flux/dz)
+            # 8. Right-Top Edge (x=-1, z=-1)
+            laplacian[-1, 1:-1, -1] = (2*(u[-2,1:-1,-1]-u[-1,1:-1,-1])/dx**2 + 2*flux/dx) + \
+                                      (u[-1,2:,-1]-2*u[-1,1:-1,-1]+u[-1,:-2,-1])/dy**2 + \
+                                      (2*(u[-1,1:-1,-2]-u[-1,1:-1,-1])/dz**2 + 2*flux/dz)
+
+            # Edges parallel to Z-axis (x=0, x=-1, y=0, y=-1)
+            # 9. Left-Front Edge (x=0, y=0)
+            laplacian[0, 0, 1:-1] = (2*(u[1,0,1:-1]-u[0,0,1:-1])/dx**2 - 2*flux/dx) + \
+                                    (2*(u[0,1,1:-1]-u[0,0,1:-1])/dy**2 - 2*flux/dy) + \
+                                    (u[0,0,2:]-2*u[0,0,1:-1]+u[0,0,:-2])/dz**2
+            # 10. Left-Back Edge (x=0, y=-1)
+            laplacian[0, -1, 1:-1] = (2*(u[1,-1,1:-1]-u[0,-1,1:-1])/dx**2 - 2*flux/dx) + \
+                                     (2*(u[0,-2,1:-1]-u[0,-1,1:-1])/dy**2 + 2*flux/dy) + \
+                                     (u[0,-1,2:]-2*u[0,-1,1:-1]+u[0,-1,:-2])/dz**2
+            # 11. Right-Front Edge (x=-1, y=0)
+            laplacian[-1, 0, 1:-1] = (2*(u[-2,0,1:-1]-u[-1,0,1:-1])/dx**2 + 2*flux/dx) + \
+                                     (2*(u[-1,1,1:-1]-u[-1,0,1:-1])/dy**2 - 2*flux/dy) + \
+                                     (u[-1,0,2:]-2*u[-1,0,1:-1]+u[-1,0,:-2])/dz**2
+            # 12. Right-Back Edge (x=-1, y=-1)
+            laplacian[-1, -1, 1:-1] = (2*(u[-2,-1,1:-1]-u[-1,-1,1:-1])/dx**2 + 2*flux/dx) + \
+                                      (2*(u[-1,-2,1:-1]-u[-1,-1,1:-1])/dy**2 + 2*flux/dy) + \
+                                      (u[-1,-1,2:]-2*u[-1,-1,1:-1]+u[-1,-1,:-2])/dz**2
+
+            # CORNERS
+            # 1. Left-Front-Bottom (0,0,0)
+            laplacian[0,0,0] = (2*(u[1,0,0]-u[0,0,0])/dx**2 - 2*flux/dx) + \
+                               (2*(u[0,1,0]-u[0,0,0])/dy**2 - 2*flux/dy) + \
+                               (2*(u[0,0,1]-u[0,0,0])/dz**2 - 2*flux/dz)
+            # 2. Right-Front-Bottom (-1,0,0)
+            laplacian[-1,0,0] = (2*(u[-2,0,0]-u[-1,0,0])/dx**2 + 2*flux/dx) + \
+                                (2*(u[-1,1,0]-u[-1,0,0])/dy**2 - 2*flux/dy) + \
+                                (2*(u[-1,0,1]-u[-1,0,0])/dz**2 - 2*flux/dz)
+            # 3. Left-Back-Bottom (0,-1,0)
+            laplacian[0,-1,0] = (2*(u[1,-1,0]-u[0,-1,0])/dx**2 - 2*flux/dx) + \
+                                (2*(u[0,-2,0]-u[0,-1,0])/dy**2 + 2*flux/dy) + \
+                                (2*(u[0,-1,1]-u[0,-1,0])/dz**2 - 2*flux/dz)
+            # 4. Right-Back-Bottom (-1,-1,0)
+            laplacian[-1,-1,0] = (2*(u[-2,-1,0]-u[-1,-1,0])/dx**2 + 2*flux/dx) + \
+                                 (2*(u[-1,-2,0]-u[-1,-1,0])/dy**2 + 2*flux/dy) + \
+                                 (2*(u[-1,-1,1]-u[-1,-1,0])/dz**2 - 2*flux/dz)
+            # 5. Left-Front-Top (0,0,-1)
+            laplacian[0,0,-1] = (2*(u[1,0,-1]-u[0,0,-1])/dx**2 - 2*flux/dx) + \
+                                (2*(u[0,1,-1]-u[0,0,-1])/dy**2 - 2*flux/dy) + \
+                                (2*(u[0,0,-2]-u[0,0,-1])/dz**2 + 2*flux/dz)
+            # 6. Right-Front-Top (-1,0,-1)
+            laplacian[-1,0,-1] = (2*(u[-2,0,-1]-u[-1,0,-1])/dx**2 + 2*flux/dx) + \
+                                 (2*(u[-1,1,-1]-u[-1,0,-1])/dy**2 - 2*flux/dy) + \
+                                 (2*(u[-1,0,-2]-u[-1,0,-1])/dz**2 + 2*flux/dz)
+            # 7. Left-Back-Top (0,-1,-1)
+            laplacian[0,-1,-1] = (2*(u[1,-1,-1]-u[0,-1,-1])/dx**2 - 2*flux/dx) + \
+                                 (2*(u[0,-2,-1]-u[0,-1,-1])/dy**2 + 2*flux/dy) + \
+                                 (2*(u[0,-1,-2]-u[0,-1,-1])/dz**2 + 2*flux/dz)
+            # 8. Right-Back-Top (-1,-1,-1)
+            laplacian[-1,-1,-1] = (2*(u[-2,-1,-1]-u[-1,-1,-1])/dx**2 + 2*flux/dx) + \
+                                  (2*(u[-1,-2,-1]-u[-1,-1,-1])/dy**2 + 2*flux/dy) + \
+                                  (2*(u[-1,-1,-2]-u[-1,-1,-1])/dz**2 + 2*flux/dz)
             
         elif is_dirichlet:
             laplacian[0,:,:]=0; laplacian[-1,:,:]=0; 

@@ -77,8 +77,8 @@ class ExplicitEulerBCSchema(Schema):
             dt_max = min_dx_squared / (2 * self.ndim * D) if D > 0 else float('inf')
             
             warnings.warn(
-                f"Stability condition violated! "
-                f"CFL number = {r_total:.4f} > {max_stable}. "
+                f"\nStability condition violated! "
+                f"\nCFL number = {r_total:.4f} > {max_stable}. "
                 f"For stability in {self.ndim}D, use dt ≤ {dt_max:.6e}. "
                 f"Current dt = {self.dt:.6e}.",
                 UserWarning,
