@@ -285,6 +285,20 @@ class Schema(ABC):
             if self.t + self.dt > t_final:
                 old_dt = self.dt
                 self.dt = t_final - self.t
+
+                # Solve BC integration into matrices problem
+
+                # if isinstance(self, (ImplicitEulerBCSchema, ADIBCSchema)):
+                #     self._build_system_matrix()  # Rebuild system matrix with new dt
+                # elif isinstance(self, (CrankNicolsonADIBCSchema, CrankNicolsonBCSchema)):
+                #     self._build_system_matrices()  # Rebuild system matrix with new dt
+                                # Rebuild system matrix if method exists
+
+                if hasattr(self, '_build_system_matrix'):
+                    self._build_system_matrix()
+                elif hasattr(self, '_build_system_matrices'):
+                    self._build_system_matrices()
+
                 self.step()
                 self.dt = old_dt
             else:
