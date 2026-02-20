@@ -210,7 +210,11 @@ class ExponentialDecay(GoldenSolution):
         
     def evaluate(self, coordinates: Union[np.ndarray, Tuple[np.ndarray, ...]], t: float) -> np.ndarray:
         """Evaluate exponential decay solution."""
-        u0 = self.initial_condition(coordinates)
+        if isinstance(coordinates, (list, tuple)):
+            coords_to_use = coordinates[0]
+        else:
+            coords_to_use = coordinates
+        u0 = self.initial_condition(coords_to_use)
         return u0 * np.exp(-self.decay_rate * t)
     
     def get_description(self) -> str:
@@ -260,7 +264,10 @@ class SteadyStateAgentDiffusion(GoldenSolution):
         kappa = np.sqrt(self.lambda_ / self.D)
         
         if self.ndim == 1:
-            x = coordinates
+            if isinstance(coordinates, (list, tuple)):
+                x = np.asarray(coordinates[0])
+            else:
+                x = np.asarray(coordinates)
             x0 = self.source_position[0]
             r = np.abs(x - x0)
             return (self.S / (2 * self.D * kappa)) * np.exp(-kappa * r)
@@ -455,6 +462,33 @@ class StepFunctionDiffusion2D(GoldenSolution):
     def get_description(self) -> str:
         return "2D Corner Step Diffusion (Product Solution)"
 
+class SineDecay1D(GoldenSolution):
+    """
+    Fundamental solution for 1D diffusion equation with sine wave initial condition.
+    
+    Solves: ∂u/∂t = D∇²u
+    Initial condition: u(x,0) = A·sin(k·π·x)
+    Solution: u(x,t) = A·sin(k·π·x)·exp(-D(k·π)²t)
+    """
+    
+    def __init__(self, wavenumber: float = 1.0, amplitude: float = 1.0, 
+                 diffusion_coefficient: float = 1.0):
+        self.k = wavenumber
+        self.amplitude = amplitude
+        self.D = diffusion_coefficient
+        
+    def evaluate(self, coordinates: Union[np.ndarray, Tuple[np.ndarray, ...]], t: float) -> np.ndarray:
+        if isinstance(coordinates, (list, tuple)):
+            x = coordinates[0]
+        else:
+            x = coordinates
+            
+        decay_factor = np.exp(-self.D * (self.k * np.pi)**2 * t)
+        return self.amplitude * np.sin(self.k * np.pi * x) * decay_factor
+        
+    def get_description(self) -> str:
+        return f"1D Sine decay (D={self.D}, k={self.k})"
+
 def create_golden_solution_from_dict(spec: Dict[str, Any]) -> GoldenSolution:
     """
     Factory function to create GoldenSolution from dictionary specification.
@@ -535,6 +569,13 @@ def create_golden_solution_from_dict(spec: Dict[str, Any]) -> GoldenSolution:
             val_in=spec.get('val_in', 1.0),
             diffusion_coefficient=spec.get('diffusion_coefficient', 1.0),
             n_terms=spec.get('n_terms', 100)
+        )
+    
+    elif solution_type == 'sine_decay_1d':
+        return SineDecay1D(
+            wavenumber=spec.get('wavenumber', 1.0),
+            amplitude=spec.get('amplitude', 1.0),
+            diffusion_coefficient=spec.get('diffusion_coefficient', 1.0)
         )
 
     else:

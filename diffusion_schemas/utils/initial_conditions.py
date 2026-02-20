@@ -289,6 +289,65 @@ def radial_gradient(
     
     return _radial_gradient
 
+def sine(
+    wavenumber: Union[float, Tuple[float, ...]] = 1.0,
+    amplitude: float = 1.0,
+    phase: Union[float, Tuple[float, ...]] = 0.0
+):
+    """
+    Create a sine wave initial condition.
+    
+    Returns a function that evaluates:
+        u(x) = amplitude * product(sin(k_i * pi * x_i + phi_i))
+    
+    Parameters
+    ----------
+    wavenumber : Union[float, Tuple[float, ...]], optional
+        Number of half-sine waves across the domain. Scalar for all dimensions 
+        or a tuple for specific per-axis wavenumbers. Default is 1.0.
+    amplitude : float, optional
+        Maximum amplitude of the wave. Default is 1.0.
+    phase : Union[float, Tuple[float, ...]], optional
+        Phase shift in radians. Scalar or tuple. Default is 0.0.
+        
+    Returns
+    -------
+    Callable
+        Function that takes coordinate arrays and returns the sine distribution.
+        
+    Examples
+    --------
+    >>> # 1D Sine wave (half-period)
+    >>> ic = sine(wavenumber=1.0, amplitude=1.0)
+    >>> schema.set_initial_condition(ic)
+    
+    >>> # 2D Sine wave with different frequencies
+    >>> ic = sine(wavenumber=(2.0, 1.0), amplitude=1.0)
+    >>> schema.set_initial_condition(ic)
+    """
+    
+    def _sine(*coords):
+        ndim = len(coords)
+        
+        # Ensure wavenumber and phase are tuples of length ndim
+        if isinstance(wavenumber, (int, float)):
+            k_vals = (float(wavenumber),) * ndim
+        else:
+            k_vals = tuple(wavenumber)
+            
+        if isinstance(phase, (int, float)):
+            phi_vals = (float(phase),) * ndim
+        else:
+            phi_vals = tuple(phase)
+
+        # Compute the product of sines for multi-dimensional waves
+        result = np.full_like(coords[0], amplitude)
+        for i in range(ndim):
+            result *= np.sin(k_vals[i] * np.pi * coords[i] + phi_vals[i])
+            
+        return result
+    
+    return _sine
 
 def sum_conditions(*conditions):
     """

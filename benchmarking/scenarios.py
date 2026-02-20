@@ -9,7 +9,7 @@ the analytical solution for validation.
 
 import numpy as np
 from typing import Dict, Any, List, Union, Tuple, Callable
-from diffusion_schemas.utils.initial_conditions import gaussian, uniform, step_function, checkerboard, sphere
+from diffusion_schemas.utils.initial_conditions import gaussian, uniform, step_function, checkerboard, sphere, sine
 from diffusion_schemas.utils.boundary import (
     DirichletBC, NeumannBC, PeriodicBC, RobinBC, BoundaryCondition
 )
@@ -77,7 +77,12 @@ def _build_initial_condition(ic_spec: Union[Dict[str, Any], Callable, np.ndarray
                 value_inside=ic_spec.get('value_inside', 1.0),
                 value_outside=ic_spec.get('value_outside', 0.0)
             )
-        
+        elif ic_type == 'sine':
+            return sine(
+                wavenumber=ic_spec.get('wavenumber', 1.0),
+                amplitude=ic_spec.get('amplitude', 1.0)
+            )
+
         elif ic_type == 'custom':
             return ic_spec['function']
         
@@ -436,7 +441,7 @@ STEP_FUNCTION_1D = {
     'domain_size': 1.0,
     'grid_points': 500,
     'dt': 0.00005,
-    't_final': 0.2,
+    't_final': 0.16,
     
     'diffusion_coefficient': 0.01,
     'decay_rate': 0.0,
@@ -507,6 +512,150 @@ STEP_FUNCTION_2D = {
         }
 }
 
+EXPONENTIAL_DECAY_1D = {
+    'name': 'exponential_decay_1d',
+    'description': 'Pure exponential decay without spatial diffusion',
+    
+    'domain_size': 1.0,
+    'grid_points': 100,
+    'dt': 0.001,
+    't_final': 2.0,
+    
+    'diffusion_coefficient': 0.0,  # Disabled to test purely decay
+    'decay_rate': 1.5,             # λ value
+    
+    'initial_condition': {
+        'type': 'gaussian',
+        'center': 0.5,
+        'amplitude': 10.0,
+        'width': 0.1
+    },
+    
+    'boundary_condition': {
+        'type': 'neumann',
+        'flux': 0.0
+    },
+    
+    'agents': None,
+    
+    'golden_solution': {
+        'type': 'exponential_decay',
+        'initial_condition': gaussian(center=0.5, amplitude=10.0, width=0.1),
+        'decay_rate': 1.5
+    }
+}
+
+STEADY_STATE_AGENT_1D = {
+    'name': 'steady_state_agent_1d',
+    'description': '1D diffusion with decay and a continuous point source',
+    
+    'domain_size': 1.0,
+    'grid_points': 51,  
+    'dt': 0.005,
+    't_final': 10.0, # Large enough to reach steady state (never reached anyway)
+    
+    'diffusion_coefficient': 0.01,
+    'decay_rate': 0.1,
+    
+    'initial_condition': {
+        'type': 'uniform',
+        'value': 0.0
+    },
+    
+    'boundary_condition': {
+        'type': 'dirichlet',       # Approximating u -> 0 at infinite distance
+        'values': [0.0, 0.0, 0.0, 0.0]
+    },
+    
+    'agents': [
+        {
+            'position': (0.33,), # Must be an iterable
+            'secretion_rate': 1.0 # Secretion rate of the point source agent
+        }
+    ],
+    
+    'golden_solution': {
+        'type': 'steady_state_agent',
+        'source_position': (0.33,),  # Should not be exactly at the center to avoid singularity
+        'source_strength': 1.0,
+        'diffusion_coefficient': 0.01,
+        'decay_rate': 0.1,
+        'ndim': 1
+    }
+}
+
+STEADY_STATE_AGENT_2D = {
+    'name': 'steady_state_agent_2d',
+    'description': '2D diffusion with decay and a continuous point source',
+    
+    'domain_size': [1.0, 1.0],
+    'grid_points': [51, 51],       # Odd number ensures a grid point lands exactly at [0.5, 0.5]
+    'dt': 0.005,
+    't_final': 20.0,               # Large enough to reach steady state
+    
+    'diffusion_coefficient': 0.01,
+    'decay_rate': 0.1,
+    
+    'initial_condition': {
+        'type': 'uniform',
+        'value': 0.0
+    },
+    
+    'boundary_condition': {
+        'type': 'dirichlet',       # Approximating u -> 0 at infinite distance
+        'values': [0.0, 0.0, 0.0, 0.0]
+    },
+    
+    'agents': [
+        {
+            'position': [0.33, 0.33],
+            'secretion_rate': 1.0        # Secretion rate of the point source agent
+        }
+    ],
+    
+    'golden_solution': {
+        'type': 'steady_state_agent',
+        'source_position': [0.33, 0.33],  # Should not be exactly at the center to avoid singularity
+        'source_strength': 1.0,
+        'diffusion_coefficient': 0.01,
+        'decay_rate': 0.1,
+        'ndim': 2
+    }
+}
+
+SINE_DECAY_1D = {
+    'name': 'sine_decay_1d',
+    'description': '1D Sine wave decay with Dirichlet boundaries',
+    
+    'domain_size': 1.0,
+    'grid_points': 100,
+    'dt': 0.0005,
+    't_final': 0.5,
+    
+    'diffusion_coefficient': 0.01,
+    'decay_rate': 0.0,
+    
+    'initial_condition': {
+        'type': 'sine',
+        'wavenumber': 3.0,  # Number of half-sine waves
+        'amplitude': 1.0
+    },
+    
+    'boundary_condition': {
+        'type': 'dirichlet',
+        'values': [0.0, 0.0]
+    },
+    
+    'agents': None,
+    
+    'golden_solution': {
+        'type': 'sine_decay_1d',
+        'wavenumber': 3.0,
+        'amplitude': 1.0,
+        'diffusion_coefficient': 0.01
+    }
+}
+
 def get_default_scenarios() -> List[Dict[str, Any]]:
     """
     Get list of default test scenarios.
@@ -521,7 +670,6 @@ def get_default_scenarios() -> List[Dict[str, Any]]:
         GAUSSIAN_PULSE_2D,
         GAUSSIAN_PULSE_3D
     ]
-
 
 def get_scenario_by_name(name: str) -> Dict[str, Any]:
     """
@@ -547,7 +695,11 @@ def get_scenario_by_name(name: str) -> Dict[str, Any]:
         'gaussian_pulse_2d': GAUSSIAN_PULSE_2D,
         'gaussian_pulse_3d': GAUSSIAN_PULSE_3D,
         'step_function_1d': STEP_FUNCTION_1D,
-        'step_function_2d': STEP_FUNCTION_2D
+        'step_function_2d': STEP_FUNCTION_2D,
+        'steady_state_agent_1d': STEADY_STATE_AGENT_1D,
+        'steady_state_agent_2d': STEADY_STATE_AGENT_2D,
+        'exponential_decay_1d': EXPONENTIAL_DECAY_1D,
+        'sine_decay_1d': SINE_DECAY_1D
     }
     
     if name not in scenarios:

@@ -64,7 +64,13 @@ from benchmarking.scenarios import (
     build_scenario_components,
     GAUSSIAN_PULSE_1D,
     GAUSSIAN_PULSE_2D,
-    GAUSSIAN_PULSE_3D
+    GAUSSIAN_PULSE_3D,
+    STEP_FUNCTION_1D,
+    STEP_FUNCTION_2D,
+    STEADY_STATE_AGENT_1D,
+    STEADY_STATE_AGENT_2D,
+    EXPONENTIAL_DECAY_1D,
+    SINE_DECAY_1D
 )
 
 # Analytical solutions
@@ -75,6 +81,9 @@ from benchmarking.golden_solutions import (
     GaussianDiffusion3D,
     ExponentialDecay,
     SteadyStateAgentDiffusion,
+    StepFunctionDiffusion1D,
+    StepFunctionDiffusion2D,
+    SineDecay1D,
     create_golden_solution_from_dict
 )
 
