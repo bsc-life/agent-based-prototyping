@@ -169,11 +169,7 @@ class CrankNicolsonADIBCSchema(Schema):
         
         # Reshape to grid
         self.state = u_new_grid
-        
-        # Final enforcement of boundary conditions (Safety for Dirichlet)
-        if self._boundary_conditions is not None:
-            self.state = self._apply_boundary_conditions(self.state)
-        
+
         # Update time
         self.t += self.dt
 

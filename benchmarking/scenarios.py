@@ -280,6 +280,98 @@ def create_scenario(name: str,
     
     return scenario
 
+def create_scenario_with_numerical_reference(
+    name: str,
+    schema_class,
+    domain_size: Union[float, Tuple[float, ...]],
+    grid_points: Union[int, Tuple[int, ...]],
+    dt: float,
+    t_final: float,
+    initial_condition: Union[Dict[str, Any], Callable, np.ndarray, float],
+    diffusion_coefficient: float = 1.0,
+    decay_rate: float = 0.0,
+    boundary_condition: Union[Dict[str, Any], BoundaryCondition, None] = None,
+    agents: Union[List[Dict[str, Any]], List[Agent], None] = None,
+    dx_refinement_factor: int = 10,
+    dt_refinement_factor: int = 10,
+    **metadata
+) -> Dict[str, Any]:
+    """
+    Create a scenario that uses a high-resolution schema run as the golden solution.
+    
+    Parameters
+    ----------
+    name : str
+        Scenario name.
+    schema_class : class
+        Schema class to use for reference solution (e.g., ADISchema).
+    domain_size : float or tuple
+        Domain size.
+    grid_points : int or tuple
+        Number of grid points for the test (coarse grid).
+    dt : float
+        Time step for the test (coarse time step).
+    t_final : float
+        Final time.
+    initial_condition : dict, callable, ndarray, or float
+        Initial condition specification.
+    diffusion_coefficient : float
+        Diffusion coefficient.
+    decay_rate : float
+        Decay rate.
+    boundary_condition : dict, BoundaryCondition, or None
+        Boundary condition.
+    agents : list or None
+        Agent specifications.
+    dx_refinement_factor : int
+        Factor to refine spatial grid for reference (default 10).
+    dt_refinement_factor : int
+        Factor to refine time step for reference (default 10).
+    **metadata
+        Additional metadata.
+        
+    Returns
+    -------
+    dict
+        Scenario specification with numerical reference golden solution.
+    """
+    # Create base scenario parameters
+    scenario_params = {
+        'domain_size': domain_size,
+        'grid_points': grid_points,
+        'dt': dt,
+        't_final': t_final,
+        'diffusion_coefficient': diffusion_coefficient,
+        'decay_rate': decay_rate,
+        'initial_condition': initial_condition,
+        'boundary_condition': boundary_condition,
+        'agents': agents
+    }
+    
+    # Create the golden solution specification
+    golden_solution_spec = {
+        'type': 'numerical_reference',
+        'schema_class': schema_class,
+        'scenario_params': scenario_params,
+        'dx_refinement_factor': dx_refinement_factor,
+        'dt_refinement_factor': dt_refinement_factor
+    }
+    
+    # Create full scenario
+    return create_scenario(
+        name=name,
+        domain_size=domain_size,
+        grid_points=grid_points,
+        dt=dt,
+        t_final=t_final,
+        initial_condition=initial_condition,
+        golden_solution=golden_solution_spec,
+        diffusion_coefficient=diffusion_coefficient,
+        decay_rate=decay_rate,
+        boundary_condition=boundary_condition,
+        agents=agents,
+        **metadata
+    )
 
 def build_scenario_components(scenario: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -432,6 +524,10 @@ GAUSSIAN_PULSE_3D = {
         'diffusion_coefficient': 0.01
     }
 }
+
+# ==============================================================================
+# Add-ons for additional testing
+# ==============================================================================
 
 # We need to define a new golden solution for the step function case
 STEP_FUNCTION_1D = {
@@ -656,6 +752,38 @@ SINE_DECAY_1D = {
     }
 }
 
+# BioFVM convergence test 1: 1D diffusion with cosine initial condition and zero-flux boundaries
+COSINE_DIFFUSION_1D = {
+    'name': 'cosine_diffusion_1d',
+    'description': 'First convergence test',
+    
+    'domain_size': 1.0,
+    'grid_points': 100,
+    'dt': 0.00001,
+    't_final': 0.2,
+    
+    'diffusion_coefficient': 1,
+    'decay_rate': 0.0,
+    
+    'initial_condition': {
+        'type': 'custom',
+        'function': lambda x: 1 + np.cos(np.pi * x / 0.5)
+    },
+    
+    'boundary_condition': {
+        'type': 'neumann',
+        'values': 0.0
+    },
+    
+    'agents': None,
+
+    'golden_solution': lambda x, t: (1.0 + np.cos(np.pi * np.asarray(x).flatten() / 0.5) * np.exp(- (np.pi / 0.5)**2 * t))
+}
+
+# ==============================================================================
+# Functions
+# ==============================================================================
+
 def get_default_scenarios() -> List[Dict[str, Any]]:
     """
     Get list of default test scenarios.
@@ -699,7 +827,8 @@ def get_scenario_by_name(name: str) -> Dict[str, Any]:
         'steady_state_agent_1d': STEADY_STATE_AGENT_1D,
         'steady_state_agent_2d': STEADY_STATE_AGENT_2D,
         'exponential_decay_1d': EXPONENTIAL_DECAY_1D,
-        'sine_decay_1d': SINE_DECAY_1D
+        'sine_decay_1d': SINE_DECAY_1D,
+        'cosine_diffusion_1d': COSINE_DIFFUSION_1D
     }
     
     if name not in scenarios:

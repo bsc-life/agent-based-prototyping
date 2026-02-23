@@ -5,6 +5,7 @@ from pathlib import Path
 # New framework imports - cleaner with __init__.py!
 from benchmarking import (
     BenchmarkRunner,
+    create_scenario_with_numerical_reference,
     get_default_scenarios,
     get_scenario_by_name,
     create_scenario,
@@ -163,24 +164,97 @@ def sine_decay():
 
     runner = BenchmarkRunner()
 
-    runner.add_schema(ExplicitEulerSchema, "Explicit Euler")
-    runner.add_schema(ImplicitEulerSchema, "Implicit Euler")
-    runner.add_schema(ADISchema, "ADI")
-    runner.add_schema(CrankNicolsonSchema, "Crank-Nicolson")
-    runner.add_schema(CrankNicolsonADISchema, "Crank-Nicolson ADI")
+    runner.add_schema(ExplicitEulerBCSchema, "Explicit Euler")
+    runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
+    runner.add_schema(ADIBCSchema, "ADI")
+    runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
+    runner.add_schema(CrankNicolsonADIBCSchema, "Crank-Nicolson ADI")
 
     runner.add_scenario(sine_decay_1d)
     
     results = runner.run(
-        output_dir='benchmark_results/sine_decay',
+        output_dir='benchmark_results/sine_decay_bc',
         store_history=True,
         generate_plots=True
     )
     
     summary = runner.generate_summary_report(
-        output_path='benchmark_results/sine_decay/summary.csv'
+        output_path='benchmark_results/sine_decay_bc/summary.csv'
     )
     
+    return results, summary
+
+def cosine_diffusion():
+    
+    print("\n" + "=" * 70)
+    print("Convergence Test 1 from BioFVM Benchmarking")
+    print("=" * 70)
+
+    convergence_test_1 = get_scenario_by_name('cosine_diffusion_1d')  
+
+    runner = BenchmarkRunner()
+
+    runner.add_schema(ExplicitEulerBCSchema, "Explicit Euler")
+    runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
+    runner.add_schema(ADIBCSchema, "ADI")
+    runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
+    runner.add_schema(CrankNicolsonADIBCSchema, "Crank-Nicolson ADI")
+
+    runner.add_scenario(convergence_test_1)
+    
+    results = runner.run(
+        output_dir='benchmark_results/convergence_test_1_bc',
+        store_history=True,
+        generate_plots=True
+    )
+    
+    summary = runner.generate_summary_report(
+        output_path='benchmark_results/convergence_test_1_bc/summary.csv'
+    )
+
+    return results, summary
+
+def custom_scenario():
+
+    scenario = create_scenario_with_numerical_reference(
+        name='Test against high-resolution ADI solution',
+        schema_class=ADIBCSchema,
+
+        domain_size=1.0,
+        grid_points=100,  # Coarse grid for testing
+        dt=0.005,  # Coarse time step
+        t_final=0.2,
+
+        diffusion_coefficient=0.01,
+        decay_rate=0.0,
+
+        initial_condition=lambda x: np.sin(2*np.pi*x/0.1), 
+        boundary_condition={'type': 'neumann', 'flux': 0.0},
+
+        dx_refinement_factor=10, 
+        dt_refinement_factor=10
+    )
+
+    runner = BenchmarkRunner()
+
+    # runner.add_schema(ExplicitEulerBCSchema, "Explicit Euler")
+    runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
+    runner.add_schema(ADIBCSchema, "ADI")
+    runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
+    runner.add_schema(CrankNicolsonADIBCSchema, "Crank-Nicolson ADI")
+
+    runner.add_scenario(scenario=scenario)
+    
+    results = runner.run(
+        output_dir='benchmark_results/numerical_reference_test',
+        store_history=True,
+        generate_plots=True
+    )
+    
+    summary = runner.generate_summary_report(
+        output_path='benchmark_results/numerical_reference_test/summary.csv'
+    )
+
     return results, summary
 
 def main():
@@ -189,7 +263,7 @@ def main():
     print("Diffusion schema benchmarking")
     print("=" * 70)
 
-    results, summary = sine_decay()
+    results, summary = custom_scenario()
 
 if __name__ == "__main__":
     main()

@@ -155,23 +155,26 @@ class ImplicitEulerBCSchema(Schema):
         
         # Right-hand side: u^n + dt*S
         rhs = self.state.flatten() + self.dt * source.flatten()
-        
+
+        # Create a copy of the system matrix that could be used for calculations
+        A = self.system_matrix.copy()
+                
         # Apply boundary conditions directly to the system if needed
         if isinstance(self._boundary_conditions, DirichletBC):
-            rhs = self._apply_dirichlet_bc(rhs) # mofidies rhs and system matrix
+            A, rhs = self._apply_dirichlet_bc(A, rhs) # modifies rhs and system matrix
         elif isinstance(self._boundary_conditions, NeumannBC):
-            rhs = self._apply_neumann_bc(rhs)
+            A, rhs = self._apply_neumann_bc(A, rhs)
 
         # Solve the linear system: A * u^(n+1) = rhs
-        u_new_flat = spsolve(self.system_matrix, rhs)
+        u_new_flat = spsolve(A, rhs)
         
         # Reshape to grid
         self.state = u_new_flat.reshape(self.grid_points)
-        
+
         # Update time
         self.t += self.dt
     
-    def _apply_dirichlet_bc(self, rhs):
+    def _apply_dirichlet_bc(self, A, rhs):
 
         value = self._boundary_conditions._get_value(self.t)
 
@@ -179,13 +182,13 @@ class ImplicitEulerBCSchema(Schema):
             N = self.grid_points
             
             # Left boundary (i=0)
-            self.system_matrix[0, :] = 0
-            self.system_matrix[0, 0] = 1
+            A[0, :] = 0
+            A[0, 0] = 1
             rhs[0] = value
             
             # Right boundary (i = N-1)
-            self.system_matrix[-1, :] = 0
-            self.system_matrix[-1, -1] = 1
+            A[-1, :] = 0
+            A[-1, -1] = 1
             rhs[-1] = value
 
         if self.ndim == 2:
@@ -194,25 +197,25 @@ class ImplicitEulerBCSchema(Schema):
             # Left boundary (i=0) and right boundary (i=Nx-1)
             for j in range(Ny):
                 idx = j * Nx  # index of (0, j)
-                self.system_matrix[idx, :] = 0
-                self.system_matrix[idx, idx] = 1
+                A[idx, :] = 0
+                A[idx, idx] = 1
                 rhs[idx] = value
             
                 idx2 = j * Nx + (Nx - 1)  # index of (Nx-1, j)
-                self.system_matrix[idx2, :] = 0
-                self.system_matrix[idx2, idx2] = 1
+                A[idx2, :] = 0
+                A[idx2, idx2] = 1
                 rhs[idx2] = value
 
             # Bottom boundary (j=0) and top boundary (j=Ny-1)
             for i in range(Nx):
                 idx = i  # index of (i, 0)
-                self.system_matrix[idx, :] = 0
-                self.system_matrix[idx, idx] = 1
+                A[idx, :] = 0
+                A[idx, idx] = 1
                 rhs[idx] = value
             
                 idx2 = (Ny - 1) * Nx + i  # index of (i, Ny-1)
-                self.system_matrix[idx2, :] = 0
-                self.system_matrix[idx2, idx2] = 1
+                A[idx2, :] = 0
+                A[idx2, idx2] = 1
                 rhs[idx2] = value
 
         if self.ndim == 3:
@@ -224,12 +227,12 @@ class ImplicitEulerBCSchema(Schema):
                     idx_left = 0 * Ny * Nz + j * Nz + k
                     idx_right = (Nx-1) * Ny * Nz + j * Nz + k
                     
-                    self.system_matrix[idx_left, :] = 0
-                    self.system_matrix[idx_left, idx_left] = 1
+                    A[idx_left, :] = 0
+                    A[idx_left, idx_left] = 1
                     rhs[idx_left] = value
                     
-                    self.system_matrix[idx_right, :] = 0
-                    self.system_matrix[idx_right, idx_right] = 1
+                    A[idx_right, :] = 0
+                    A[idx_right, idx_right] = 1
                     rhs[idx_right] = value
             
             # Y-direction boundaries
@@ -238,12 +241,12 @@ class ImplicitEulerBCSchema(Schema):
                     idx_bottom = i * Ny * Nz + 0 * Nz + k
                     idx_top = i * Ny * Nz + (Ny-1) * Nz + k
                     
-                    self.system_matrix[idx_bottom, :] = 0
-                    self.system_matrix[idx_bottom, idx_bottom] = 1
+                    A[idx_bottom, :] = 0
+                    A[idx_bottom, idx_bottom] = 1
                     rhs[idx_bottom] = value
                     
-                    self.system_matrix[idx_top, :] = 0
-                    self.system_matrix[idx_top, idx_top] = 1
+                    A[idx_top, :] = 0
+                    A[idx_top, idx_top] = 1
                     rhs[idx_top] = value
             
             # Z-direction boundaries
@@ -252,15 +255,15 @@ class ImplicitEulerBCSchema(Schema):
                     idx_front = i * Ny * Nz + j * Nz + 0
                     idx_back = i * Ny * Nz + j * Nz + (Nz-1)
                     
-                    self.system_matrix[idx_front, :] = 0
-                    self.system_matrix[idx_front, idx_front] = 1
+                    A[idx_front, :] = 0
+                    A[idx_front, idx_front] = 1
                     rhs[idx_front] = value
                     
-                    self.system_matrix[idx_back, :] = 0
-                    self.system_matrix[idx_back, idx_back] = 1
+                    A[idx_back, :] = 0
+                    A[idx_back, idx_back] = 1
                     rhs[idx_back] = value
         
-        return rhs
+        return A, rhs
 
         """
         if self.ndim == 1:
@@ -320,7 +323,7 @@ class ImplicitEulerBCSchema(Schema):
             ???
         """
 
-    def _apply_neumann_bc(self, rhs):
+    def _apply_neumann_bc(self, A, rhs):
         flux = self._boundary_conditions._get_flux(self.t + self.dt)
         D = self.diffusion_coefficient
         dt = self.dt
@@ -333,11 +336,11 @@ class ImplicitEulerBCSchema(Schema):
             forcing = (2 * dt * D * flux) / dx
 
             # Left (i=0): The neighbor (i=1) weight doubles
-            self.system_matrix[0, 1] = -2 * alpha
+            A[0, 1] = -2 * alpha
             rhs[0] -= forcing 
 
             # Right (i=N-1): The neighbor (i=N-2) weight doubles
-            self.system_matrix[-1, -2] = -2 * alpha
+            A[-1, -2] = -2 * alpha
             rhs[-1] += forcing
 
         # --- 2D CASE ---
@@ -353,16 +356,16 @@ class ImplicitEulerBCSchema(Schema):
             # Left (x=0) / Right (x=Nx-1)
             idx_l = np.arange(Ny)
             idx_r = np.arange((Nx - 1) * Ny, Nx * Ny)
-            self.system_matrix[idx_l, idx_l + Ny] = -2 * alpha_x
-            self.system_matrix[idx_r, idx_r - Ny] = -2 * alpha_x
+            A[idx_l, idx_l + Ny] = -2 * alpha_x
+            A[idx_r, idx_r - Ny] = -2 * alpha_x
             rhs[idx_l] -= force_x
             rhs[idx_r] += force_x
 
             # Bottom (y=0) / Top (y=Ny-1)
             idx_b = np.arange(0, Nx * Ny, Ny)
             idx_t = np.arange(Ny - 1, Nx * Ny, Ny)
-            self.system_matrix[idx_b, idx_b + 1] = -2 * alpha_y
-            self.system_matrix[idx_t, idx_t - 1] = -2 * alpha_y
+            A[idx_b, idx_b + 1] = -2 * alpha_y
+            A[idx_t, idx_t - 1] = -2 * alpha_y
             rhs[idx_b] -= force_y
             rhs[idx_t] += force_y
 
@@ -376,8 +379,8 @@ class ImplicitEulerBCSchema(Schema):
 
             # X-planes (Left/Right)
             idx_l, idx_r = np.arange(sx), np.arange((Nx-1)*sx, Nx*sx)
-            self.system_matrix[idx_l, idx_l + sx] = -2 * alpha_x
-            self.system_matrix[idx_r, idx_r - sx] = -2 * alpha_x
+            A[idx_l, idx_l + sx] = -2 * alpha_x
+            A[idx_r, idx_r - sx] = -2 * alpha_x
             rhs[idx_l] -= fx
             rhs[idx_r] += fx
 
@@ -385,20 +388,20 @@ class ImplicitEulerBCSchema(Schema):
             base_y = np.arange(Nz)
             idx_f = np.concatenate([base_y + i*sx for i in range(Nx)])
             idx_bk = idx_f + (Ny-1)*sy
-            self.system_matrix[idx_f, idx_f + sy] = -2 * alpha_y
-            self.system_matrix[idx_bk, idx_bk - sy] = -2 * alpha_y
+            A[idx_f, idx_f + sy] = -2 * alpha_y
+            A[idx_bk, idx_bk - sy] = -2 * alpha_y
             rhs[idx_f] -= fy
             rhs[idx_bk] += fy
 
             # Z-planes (Bottom/Top)
             idx_bt = np.arange(0, Nx*Ny*Nz, Nz)
             idx_tp = np.arange(Nz-1, Nx*Ny*Nz, Nz)
-            self.system_matrix[idx_bt, idx_bt + 1] = -2 * alpha_z
-            self.system_matrix[idx_tp, idx_tp - 1] = -2 * alpha_z
+            A[idx_bt, idx_bt + 1] = -2 * alpha_z
+            A[idx_tp, idx_tp - 1] = -2 * alpha_z
             rhs[idx_bt] -= fz
             rhs[idx_tp] += fz
 
-        return rhs
+        return A, rhs
     
     def set_diffusion_coefficient(self, value: float) -> None:
         """

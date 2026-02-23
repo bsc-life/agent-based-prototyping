@@ -59,6 +59,7 @@ from benchmarking.test_suite import (
 # Scenario creation and defaults
 from benchmarking.scenarios import (
     create_scenario,
+    create_scenario_with_numerical_reference,
     get_default_scenarios,
     get_scenario_by_name,
     build_scenario_components,
@@ -120,6 +121,7 @@ __all__ = [
     
     # Scenario creation
     'create_scenario',
+    'create_scenario_with_numerical_reference',
     'get_default_scenarios',
     'get_scenario_by_name',
     'build_scenario_components',

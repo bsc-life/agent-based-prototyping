@@ -7,7 +7,8 @@ as reference solutions for testing numerical methods.
 
 import numpy as np
 from abc import ABC, abstractmethod
-from typing import Callable, Tuple, Union, Dict, Any
+from typing import Callable, List, Tuple, Union, Dict, Any
+from scipy.interpolate import RegularGridInterpolator # For complex solutions that require numerical golden solution
 
 
 class GoldenSolution(ABC):
@@ -36,6 +37,150 @@ class GoldenSolution(ABC):
     def get_description(self) -> str:
         """Return a description of the analytical solution."""
         pass
+
+class NumericalReferenceSolution:
+    """
+    Golden solution based on high-resolution numerical simulation history.
+    Uses space-time interpolation to compare against coarser meshes at any time step.
+    """
+    def __init__(
+            self, 
+            time_array: np.ndarray,
+            reference_grid_coords: List[np.ndarray], 
+            reference_history_array: np.ndarray
+        ):
+        self.time_array = time_array
+        self.spatial_coords = reference_grid_coords
+        self.ndim = len(reference_grid_coords)
+        
+        # Interpolator points: [time, x, y, ...]
+        interpolator_points = [time_array] + reference_grid_coords
+
+        self.interpolator = RegularGridInterpolator(
+            points=interpolator_points,
+            values=reference_history_array,
+            bounds_error=False,
+            fill_value=None 
+        )
+
+    def evaluate(self, coordinates: Union[np.ndarray, Tuple[np.ndarray, ...]], t: float) -> np.ndarray:
+        # Format spatial coordinates
+        if self.ndim == 1:
+            if isinstance(coordinates, (list, tuple)):
+                x = coordinates[0]
+            else:
+                x = coordinates
+            target_shape = x.shape
+            spatial_points = x.flatten()[:, np.newaxis]  
+            
+        else:
+            if isinstance(coordinates, (list, tuple)):
+                grids = coordinates
+            else:
+                raise ValueError(f"Expected tuple of arrays for {self.ndim}D coordinates")
+                
+            target_shape = grids[0].shape
+            spatial_points = np.stack([g.flatten() for g in grids], axis=1) 
+
+        # Prepend the time coordinate to all spatial points
+        time_column = np.full((spatial_points.shape[0], 1), t)
+        space_time_points = np.hstack((time_column, spatial_points))
+
+        # Interpolate and reshape back to the original grid shape
+        result = self.interpolator(space_time_points)
+        return result.reshape(target_shape)
+
+    def get_description(self) -> str:
+        return f"Time-Aware High-Resolution Numerical Reference ({self.ndim}D)"
+
+
+def create_numerical_reference(
+    schema_class,
+    scenario_params: Dict[str, Any],
+    refinement_factor: int = 10,
+    dt_refinement_factor: int = 10
+) -> NumericalReferenceSolution:
+    
+    # Extract parameters
+    domain_size = scenario_params['domain_size']
+    base_grid_points = scenario_params['grid_points']
+    base_dt = scenario_params['dt']
+    t_final = scenario_params['t_final']
+    
+    # Determine dimensionality
+    if isinstance(domain_size, (list, tuple)):
+        ndim = len(domain_size)
+        refined_grid_points = tuple(n * refinement_factor for n in base_grid_points)
+    else:
+        ndim = 1
+        domain_size = (domain_size,)
+        refined_grid_points = (base_grid_points * refinement_factor,)
+    
+    refined_dt = base_dt / dt_refinement_factor
+    
+    # Initialize high-resolution schema
+    schema = schema_class(
+        domain_size=domain_size,
+        grid_points=refined_grid_points,
+        dt=refined_dt,
+        diffusion_coefficient=scenario_params['diffusion_coefficient'],
+        decay_rate=scenario_params.get('decay_rate', 0.0)
+    )
+    
+    # Set initial condition
+    ic = scenario_params['initial_condition']
+    if isinstance(ic, dict):
+        from benchmarking.scenarios import _build_initial_condition
+        ic = _build_initial_condition(ic)
+    schema.set_initial_condition(ic)
+    
+    # Set boundary condition
+    bc = scenario_params.get('boundary_condition')
+    if bc is not None:
+        if isinstance(bc, dict):
+            from benchmarking.scenarios import _build_boundary_condition
+            bc = _build_boundary_condition(bc)
+        schema.set_boundary_conditions(bc)
+    
+    # Set agents if present
+    agents = scenario_params.get('agents')
+    if agents is not None:
+        if isinstance(agents, list) and len(agents) > 0:
+            if isinstance(agents[0], dict):
+                from benchmarking.scenarios import _build_agents
+                agents = _build_agents(agents)
+            for agent in agents:
+                schema.add_agent(agent)
+    
+    # Run simulation to t_final AND capture the history list
+    history_list = schema.solve(t_final, store_history=True)
+    
+    # Convert the list of arrays into a single stacked numpy array
+    history_array = np.stack(history_list)
+    
+    # Build the time array based on how many frames were saved
+    time_array = np.linspace(0, t_final, len(history_list))
+    
+    # Build coordinate arrays (Updated to match your node-centered Schema base class)
+    if ndim == 1:
+        coords = [np.linspace(0, domain_size[0], refined_grid_points[0])]
+    elif ndim == 2:
+        coords = [
+            np.linspace(0, domain_size[0], refined_grid_points[0]),
+            np.linspace(0, domain_size[1], refined_grid_points[1])
+        ]
+    else:  # 3D
+        coords = [
+            np.linspace(0, domain_size[0], refined_grid_points[0]),
+            np.linspace(0, domain_size[1], refined_grid_points[1]),
+            np.linspace(0, domain_size[2], refined_grid_points[2])
+        ]
+    
+    return NumericalReferenceSolution(
+        time_array=time_array,
+        reference_grid_coords=coords,
+        reference_history_array=history_array
+    )
 
 
 class GaussianDiffusion1D(GoldenSolution):
@@ -577,6 +722,23 @@ def create_golden_solution_from_dict(spec: Dict[str, Any]) -> GoldenSolution:
             amplitude=spec.get('amplitude', 1.0),
             diffusion_coefficient=spec.get('diffusion_coefficient', 1.0)
         )
+
+    elif solution_type == 'numerical_reference':
+       # Check if already built
+        if 'reference_grid_coords' in spec:
+            return NumericalReferenceSolution(
+                reference_grid_coords=spec['reference_grid_coords'],
+                reference_solution_array=spec['reference_solution_array'],
+                t_target=spec['t_target']
+            )
+        else:
+            # Need to build it
+            return create_numerical_reference(
+                schema_class=spec['schema_class'],
+                scenario_params=spec['scenario_params'],
+                refinement_factor=spec.get('refinement_factor', 10),
+                dt_refinement_factor=spec.get('dt_refinement_factor', 10)
+            )
 
     else:
         raise ValueError(f"Unknown golden solution type: {solution_type}")

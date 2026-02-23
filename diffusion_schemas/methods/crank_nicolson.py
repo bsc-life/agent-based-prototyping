@@ -53,7 +53,7 @@ class CrankNicolsonSchema(Schema):
         dt,
         diffusion_coefficient=1.0,
         decay_rate=0.0,
-        theta=0.6
+        theta=0.5
     ):
         """Initialize the Crank-Nicolson schema."""
         super().__init__(domain_size, grid_points, dt, diffusion_coefficient, decay_rate)

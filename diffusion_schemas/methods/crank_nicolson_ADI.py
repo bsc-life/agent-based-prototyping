@@ -204,8 +204,11 @@ class CrankNicolsonADISchema(Schema):
         #       self.dt * self.theta * source_np1.flatten() + \
         #       self.dt * (1 - self.theta) * source_n.flatten()
         rhs_grid = self.state + explicit_term + self.dt * source_np1
-        if self._boundary_conditions is not None:
-            rhs_grid = self._apply_boundary_conditions(rhs_grid)
+
+        # These two lines make CN and CN-ADI differ!!!
+        # Should BC be implemented only at the end of the total step or after each step (implicit and explicit)???
+        # if self._boundary_conditions is not None:
+        #     rhs_grid = self._apply_boundary_conditions(rhs_grid)
 
         # Solve the linear system: A_impl * u^(n+1) = rhs
         # ADI step to solve the system more efficiently (split into x,y,z)
