@@ -14,6 +14,7 @@ from diffusion_schemas.utils.initial_conditions import (
     step_function,
     checkerboard,
     sphere,
+    sine
 )
 
 __all__ = [
@@ -23,9 +24,11 @@ __all__ = [
     "PeriodicBC",
     "RobinBC",
     "Agent",
+    "CompleteAgent",
     "gaussian",
     "uniform",
     "step_function",
     "checkerboard",
     "sphere",
+    "sine"
 ]

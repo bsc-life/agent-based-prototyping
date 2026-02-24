@@ -23,7 +23,8 @@ from diffusion_schemas import (
 )
 
 # Utilities for backward compatibility example
-from diffusion_schemas.utils import gaussian, DirichletBC, NeumannBC, Agent
+from diffusion_schemas.utils import gaussian, uniform, \
+DirichletBC, NeumannBC, Agent
 
 def gaussian_pulses():
 
@@ -231,8 +232,10 @@ def custom_scenario():
         initial_condition=lambda x: np.sin(2*np.pi*x/0.1), 
         boundary_condition={'type': 'neumann', 'flux': 0.0},
 
-        dx_refinement_factor=10, 
-        dt_refinement_factor=10
+        # dx_refinement_factor=10, 
+        # dt_refinement_factor=10
+        dx_ref=0.0005,
+        dt_ref=0.0005
     )
 
     runner = BenchmarkRunner()
@@ -257,13 +260,60 @@ def custom_scenario():
 
     return results, summary
 
+def custom_agent_scenario():
+
+    # Define a custom scenario with an agent-based source term
+    scenario = create_scenario_with_numerical_reference(
+        name='Custom Agent Scenario',
+        schema_class=ADIBCSchema,
+
+        domain_size=1.0,
+        grid_points=100,
+        dt=0.005,
+        t_final=0.04,
+
+        diffusion_coefficient=0.01,
+        decay_rate=0.0,
+
+        initial_condition=uniform(2.0),
+        boundary_condition={'type': 'neumann', 'flux': 0.0},
+
+        agents=[{
+                'position': [0.25,],
+                'secretion_rate': 0.1,
+                'uptake_rate': 0.05,
+                'saturation_density': 1.0
+            }],
+        
+        dx_ref=0.0005,
+        dt_ref=0.0001
+    )
+
+    runner = BenchmarkRunner()
+
+    runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
+
+    runner.add_scenario(scenario=scenario)
+    
+    results = runner.run(
+        output_dir='benchmark_results/custom_agent_scenario',
+        store_history=True,
+        generate_plots=True
+    )
+    
+    summary = runner.generate_summary_report(
+        output_path='benchmark_results/custom_agent_scenario/summary.csv'
+    )
+
+    return results, summary
+
 def main():
 
     print("\n" + "=" * 70)
     print("Diffusion schema benchmarking")
     print("=" * 70)
 
-    results, summary = custom_scenario()
+    results, summary = custom_agent_scenario()
 
 if __name__ == "__main__":
     main()

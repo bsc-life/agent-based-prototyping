@@ -234,3 +234,143 @@ class Agent:
         """String representation of the agent."""
         rate = self.secretion_rate if not callable(self.secretion_rate) else "f(t)"
         return f"Agent(name='{self.name}', position={self.position}, rate={rate})"
+
+class CompleteAgent(Agent):
+    """
+    Substrate-interacting agent with secretion (supply) and uptake capabilities.
+    
+    Implements the cell-based net source term:
+    Net Rate = Supply - Uptake
+             = S_k * (rho_star - rho) - U_k * rho
+    
+    Parameters
+    ----------
+    position : Tuple[float, ...]
+        Position of the agent (x, y) or (x, y, z).
+    secretion_rate : Union[float, Callable], optional
+        Rate constant for secretion (Sk). Target density approach.
+        Default is 0.0.
+    uptake_rate : Union[float, Callable], optional
+        Rate constant for uptake (Uk). Proportional to density.
+        Default is 0.0.
+    saturation_density : float, optional
+        Target saturation density (rho*). The density at which secretion stops.
+        Default is 0.0.
+    kernel_width : float, optional
+        Width of the Gaussian kernel. If None, uses point source.
+    name : str, optional
+        ID/Name for the agent.
+    """
+    
+    def __init__(
+        self,
+        position: Tuple[float, ...],
+        secretion_rate: Union[float, Callable] = 0.0,
+        uptake_rate: Union[float, Callable] = 0.0,
+        saturation_density: float = 0.0,
+        kernel_width: Optional[float] = None,
+        name: str = ""
+    ):
+        super().__init__(
+            position=position,
+            secretion_rate=secretion_rate,
+            kernel_width=kernel_width,
+            name=name,
+        )
+        self.uptake_rate = uptake_rate
+        self.saturation_density = saturation_density
+        
+    def get_rates(self, t: float) -> Tuple[float, float]:
+        """Get current Sk and Uk values at time t."""
+        S = self.secretion_rate(t) if callable(self.secretion_rate) else self.secretion_rate
+        U = self.uptake_rate(t) if callable(self.uptake_rate) else self.uptake_rate
+        return S, U
+
+    def _sample_field(
+        self, 
+        field: np.ndarray, 
+        coords: List[np.ndarray]
+    ) -> float:
+        """
+        Sample the substrate density (rho) at the agent's current position.
+        Uses nearest-neighbor interpolation for simplicity.
+        """
+        indices = []
+        for coord_grid, pos in zip(coords, self.position):
+            # Assuming uniform grid, find index of nearest coordinate
+            # Handle both 1D arrays and meshgrids
+            if coord_grid.ndim > 1:
+                # Extract 1D axis from meshgrid
+                grid_1d = np.unique(coord_grid)
+            else:
+                grid_1d = coord_grid
+                
+            idx = (np.abs(grid_1d - pos)).argmin()
+            indices.append(idx)
+            
+        return field[tuple(indices)]
+
+    def compute_source(
+        self,
+        field: np.ndarray,
+        coords: List[np.ndarray],
+        dx: Tuple[float, ...],
+        t: float
+    ) -> np.ndarray:
+        """
+        Compute the net source term contribution from this agent.
+        
+        New Formula: Rate = Sk * (rho* - rho) - Uk * rho
+        
+        Parameters
+        ----------
+        field : np.ndarray
+            Current substrate density field (rho).
+        coords : List[np.ndarray]
+            Coordinate grids.
+        dx : Tuple[float, ...]
+            Grid spacing.
+        t : float
+            Current time.
+        """
+        # 1. Get current parameters
+        S_k, U_k = self.get_rates(t)
+        rho_star = self.saturation_density
+        
+        # 2. Sample local density (rho) at agent position
+        rho_local = self._sample_field(field, coords)
+        
+        # 3. Calculate Net Rate
+        # Term 1: Supply (stops if rho_local = rho_star)
+        supply_term = S_k * (rho_star - rho_local)
+        
+        # Term 2: Uptake (proportional to available density)
+        uptake_term = U_k * rho_local
+        
+        net_rate = supply_term - uptake_term
+        
+        # If rate is effectively zero, return empty grid
+        if abs(net_rate) < 1e-15:
+            return np.zeros_like(field)
+
+        # 4. Distribute this net rate spatially (Point or Gaussian)
+        if self.kernel_width is None:
+            return self._point_source(coords, dx, net_rate)
+        else:
+            return self._gaussian_source(coords, net_rate)
+
+    def set_secretion_rate(self, rate: Union[float, Callable]) -> None:
+        """Update secretion rate."""
+        if not callable(rate) and rate < 0:
+            raise ValueError("Secretion rate must be non-negative")
+        self.secretion_rate = rate
+
+    def set_uptake_rate(self, rate: Union[float, Callable]) -> None:
+        """Update uptake rate."""
+        if not callable(rate) and rate < 0:
+            raise ValueError("Uptake rate must be non-negative")
+        self.uptake_rate = rate
+
+    def set_saturation_density(self, density: float) -> None:
+        """Update saturation density."""
+        self.saturation_density = density

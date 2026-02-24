@@ -38,7 +38,7 @@ class GoldenSolution(ABC):
         """Return a description of the analytical solution."""
         pass
 
-class NumericalReferenceSolution:
+class NumericalReferenceSolution(GoldenSolution):
     """
     Golden solution based on high-resolution numerical simulation history.
     Uses space-time interpolation to compare against coarser meshes at any time step.
@@ -57,8 +57,8 @@ class NumericalReferenceSolution:
         interpolator_points = [time_array] + reference_grid_coords
 
         self.interpolator = RegularGridInterpolator(
-            points=interpolator_points,
-            values=reference_history_array,
+            points=interpolator_points, # list of high-resolution 1D-arrays [time_array, x_array, y_array, ...]
+            values=reference_history_array, # actual high-resolution data cube, at each time step for each point
             bounds_error=False,
             fill_value=None 
         )
@@ -87,6 +87,7 @@ class NumericalReferenceSolution:
         space_time_points = np.hstack((time_column, spatial_points))
 
         # Interpolate and reshape back to the original grid shape
+        # Handles both time and space interpolation in one step
         result = self.interpolator(space_time_points)
         return result.reshape(target_shape)
 
@@ -97,8 +98,10 @@ class NumericalReferenceSolution:
 def create_numerical_reference(
     schema_class,
     scenario_params: Dict[str, Any],
-    refinement_factor: int = 10,
-    dt_refinement_factor: int = 10
+    # dx_refinement_factor: int = 10,
+    # dt_refinement_factor: int = 10,
+    dx_ref: float = 1e-3,
+    dt_ref: float = 1e-3
 ) -> NumericalReferenceSolution:
     
     # Extract parameters
@@ -110,13 +113,16 @@ def create_numerical_reference(
     # Determine dimensionality
     if isinstance(domain_size, (list, tuple)):
         ndim = len(domain_size)
-        refined_grid_points = tuple(n * refinement_factor for n in base_grid_points)
+        # refined_grid_points = tuple(n * dx_refinement_factor for n in base_grid_points)
+        refined_grid_points = tuple(int(round(size / dx_ref)) for size in domain_size)
     else:
         ndim = 1
         domain_size = (domain_size,)
-        refined_grid_points = (base_grid_points * refinement_factor,)
+        # refined_grid_points = (base_grid_points * dx_refinement_factor,)
+        refined_grid_points = tuple(int(round(size / dx_ref)) for size in domain_size)
     
-    refined_dt = base_dt / dt_refinement_factor
+    # refined_dt = base_dt / dt_refinement_factor
+    refined_dt = dt_ref
     
     # Initialize high-resolution schema
     schema = schema_class(
@@ -181,7 +187,6 @@ def create_numerical_reference(
         reference_grid_coords=coords,
         reference_history_array=history_array
     )
-
 
 class GaussianDiffusion1D(GoldenSolution):
     """
@@ -736,9 +741,12 @@ def create_golden_solution_from_dict(spec: Dict[str, Any]) -> GoldenSolution:
             return create_numerical_reference(
                 schema_class=spec['schema_class'],
                 scenario_params=spec['scenario_params'],
-                refinement_factor=spec.get('refinement_factor', 10),
-                dt_refinement_factor=spec.get('dt_refinement_factor', 10)
+                # dx_refinement_factor=spec.get('dx_refinement_factor', 10),
+                # dt_refinement_factor=spec.get('dt_refinement_factor', 10)
+                dx_ref=spec.get('dx_ref', 1e-3),
+                dt_ref=spec.get('dt_ref', 1e-3)
             )
 
     else:
         raise ValueError(f"Unknown golden solution type: {solution_type}")
+

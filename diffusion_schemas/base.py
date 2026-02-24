@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 from typing import Union, List, Tuple, Optional, Callable
 import numpy as np
 import warnings
+from diffusion_schemas.utils.agents import CompleteAgent
 
 
 class Schema(ABC):
@@ -325,7 +326,10 @@ class Schema(ABC):
         coords = self._create_coordinate_grids()
         
         for agent in self._agents:
-            source += agent.compute_source(coords, self.dx, self.t)
+            if isinstance(agent, CompleteAgent):
+                source += agent.compute_source(self.state, coords, self.dx, self.t)
+            else:
+                source += agent.compute_source(coords, self.dx, self.t)
         
         return source
     

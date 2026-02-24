@@ -13,7 +13,7 @@ from diffusion_schemas.utils.initial_conditions import gaussian, uniform, step_f
 from diffusion_schemas.utils.boundary import (
     DirichletBC, NeumannBC, PeriodicBC, RobinBC, BoundaryCondition
 )
-from diffusion_schemas.utils.agents import Agent
+from diffusion_schemas.utils.agents import Agent, CompleteAgent
 from benchmarking.golden_solutions import (
     GoldenSolution, GaussianDiffusion1D, GaussianDiffusion2D, GaussianDiffusion3D, StepFunctionDiffusion1D,
     create_golden_solution_from_dict
@@ -146,7 +146,7 @@ def _build_boundary_condition(bc_spec: Union[Dict[str, Any], BoundaryCondition, 
     raise TypeError(f"Invalid boundary condition specification type: {type(bc_spec)}")
 
 
-def _build_agents(agents_spec: Union[List[Dict[str, Any]], List[Agent], None]) -> List[Agent]:
+def _build_agents(agents_spec: Union[List[Dict[str, Any]], List[Agent], List[CompleteAgent], None]) -> List[Agent]:
     """
     Build list of agents from specification.
     
@@ -157,6 +157,8 @@ def _build_agents(agents_spec: Union[List[Dict[str, Any]], List[Agent], None]) -
         If list of dict, each dict should have:
             - 'position': tuple of coordinates
             - 'secretion_rate': float or callable (optional, default 1.0)
+            - 'uptake_rate': float or callable (optional, default 0.0)
+            - 'saturation_density': float (optional, default 0.0)
             - 'kernel_width': float or None (optional, default None = point source)
             - 'name': str (optional)
         If list of Agent instances, returns as-is.
@@ -174,18 +176,27 @@ def _build_agents(agents_spec: Union[List[Dict[str, Any]], List[Agent], None]) -
         return []
     
     # Check if already Agent instances
-    if isinstance(agents_spec[0], Agent):
+    if isinstance(agents_spec[0], (Agent, CompleteAgent)):
         return agents_spec
     
     # Build from dicts
     agents = []
     for agent_spec in agents_spec:
-        agent = Agent(
-            position=agent_spec['position'],
-            secretion_rate=agent_spec.get('secretion_rate', 1.0),
-            kernel_width=agent_spec.get('kernel_width', None),
-            name=agent_spec.get('name', '')
+        use_complete_agent = (
+            'saturation_density' in agent_spec
         )
+        agent_class = CompleteAgent if use_complete_agent else Agent
+        agent_kwargs = {
+            'position': agent_spec['position'],
+            'secretion_rate': agent_spec.get('secretion_rate', 1.0),
+            'kernel_width': agent_spec.get('kernel_width', None),
+            'name': agent_spec.get('name', '')
+        }
+        if use_complete_agent:
+            agent_kwargs['uptake_rate'] = agent_spec.get('uptake_rate', 0.0)
+            agent_kwargs['saturation_density'] = agent_spec.get('saturation_density', 0.0)
+
+        agent = agent_class(**agent_kwargs)
         agents.append(agent)
     
     return agents
@@ -292,8 +303,10 @@ def create_scenario_with_numerical_reference(
     decay_rate: float = 0.0,
     boundary_condition: Union[Dict[str, Any], BoundaryCondition, None] = None,
     agents: Union[List[Dict[str, Any]], List[Agent], None] = None,
-    dx_refinement_factor: int = 10,
-    dt_refinement_factor: int = 10,
+    # dx_refinement_factor: int = 10,
+    # dt_refinement_factor: int = 10,
+    dx_ref: float = 1e-3,
+    dt_ref: float = 1e-3,
     **metadata
 ) -> Dict[str, Any]:
     """
@@ -353,8 +366,10 @@ def create_scenario_with_numerical_reference(
         'type': 'numerical_reference',
         'schema_class': schema_class,
         'scenario_params': scenario_params,
-        'dx_refinement_factor': dx_refinement_factor,
-        'dt_refinement_factor': dt_refinement_factor
+        'dx': dx_ref,
+        'dt': dt_ref
+        # 'dx_refinement_factor': dx_refinement_factor,
+        # 'dt_refinement_factor': dt_refinement_factor
     }
     
     # Create full scenario
