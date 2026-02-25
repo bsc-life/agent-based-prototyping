@@ -11,19 +11,19 @@ import numpy as np
 
 class Agent:
     """
-    Substrate-secreting agent with position and secretion rate.
+    Agent with position and net rate source term.
     
     Agents produce a source term in the diffusion equation, representing
-    cells, particles, or other entities that release chemical substances.
+    cells, particles, or other entities that release or consume chemical substances.
     
     Parameters
     ----------
     position : Tuple[float, ...]
         Position of the agent in the domain (x,) for 1D, (x, y) for 2D,
         or (x, y, z) for 3D.
-    secretion_rate : Union[float, Callable]
-        Rate of substrate secretion. Can be a constant or a function
-        of time: secretion_rate(t) -> float.
+    net_rate : Union[float, Callable]
+        Net rate of source/sink. Can be a constant or a function
+        of time: net_rate(t) -> float.
     kernel_width : float, optional
         Width of the Gaussian kernel used to distribute the source.
         If None, uses a point source approximation. Default is None.
@@ -34,8 +34,8 @@ class Agent:
     ----------
     position : Tuple[float, ...]
         Agent position.
-    secretion_rate : Union[float, Callable]
-        Secretion rate.
+    net_rate : Union[float, Callable]
+        Net source/sink rate.
     kernel_width : Optional[float]
         Kernel width for source distribution.
     name : str
@@ -45,19 +45,19 @@ class Agent:
     def __init__(
         self,
         position: Tuple[float, ...],
-        secretion_rate: float = 1.0,
+        net_rate: float = 1.0,
         kernel_width: Optional[float] = None,
         name: str = ""
     ):
         """Initialize the agent."""
         self.position = tuple(position)
-        self.secretion_rate = secretion_rate
+        self.net_rate = net_rate
         self.kernel_width = kernel_width
         self.name = name or f"Agent_{id(self)}"
         
-    def get_secretion_rate(self, t: float) -> float:
+    def get_net_rate(self, t: float) -> float:
         """
-        Get the secretion rate at time t.
+        Get the net rate at time t.
         
         Parameters
         ----------
@@ -67,11 +67,11 @@ class Agent:
         Returns
         -------
         float
-            Secretion rate at time t.
+            Net rate at time t.
         """
-        if callable(self.secretion_rate):
-            return self.secretion_rate(t)
-        return self.secretion_rate
+        if callable(self.net_rate):
+            return self.net_rate(t)
+        return self.net_rate
     
     def compute_source(
         self,
@@ -96,10 +96,10 @@ class Agent:
         np.ndarray
             Source term array with same shape as coordinate grids.
         """
-        rate = self.get_secretion_rate(t)
+        rate = self.get_net_rate(t)
         
         if rate == 0:
-            # No secretion
+            # No source/sink
             if len(coords) == 1:
                 return np.zeros_like(coords[0])
             else:
@@ -217,23 +217,21 @@ class Agent:
             )
         self.position = tuple(position)
     
-    def set_secretion_rate(self, rate: float) -> None:
+    def set_net_rate(self, rate: float) -> None:
         """
-        Update the secretion rate.
+        Update the net rate.
         
         Parameters
         ----------
         rate : float
-            New secretion rate (must be non-negative).
+            New net rate.
         """
-        if rate < 0:
-            raise ValueError("Secretion rate must be non-negative")
-        self.secretion_rate = rate
+        self.net_rate = rate
     
     def __repr__(self) -> str:
         """String representation of the agent."""
-        rate = self.secretion_rate if not callable(self.secretion_rate) else "f(t)"
-        return f"Agent(name='{self.name}', position={self.position}, rate={rate})"
+        rate = self.net_rate if not callable(self.net_rate) else "f(t)"
+        return f"Agent(name='{self.name}', position={self.position}, net_rate={rate})"
 
 class CompleteAgent(Agent):
     """
@@ -273,10 +271,11 @@ class CompleteAgent(Agent):
     ):
         super().__init__(
             position=position,
-            secretion_rate=secretion_rate,
+            net_rate=0.0,
             kernel_width=kernel_width,
             name=name,
         )
+        self.secretion_rate = secretion_rate
         self.uptake_rate = uptake_rate
         self.saturation_density = saturation_density
         
