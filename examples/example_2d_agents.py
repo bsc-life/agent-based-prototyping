@@ -11,6 +11,7 @@ from matplotlib.animation import FuncAnimation
 from diffusion_schemas import CrankNicolsonADISchema
 from diffusion_schemas.methods.crank_nicolson_ADI import CrankNicolsonADISchema
 from diffusion_schemas.utils import Agent, DirichletBC
+from matplotlib.animation import FuncAnimation
 
 
 def main():
@@ -45,9 +46,9 @@ def main():
     
     # Add substrate-secreting agents at different positions
     agents = [
-        Agent(position=(0.25, 0.25), secretion_rate=10.0, kernel_width=0.03, name="Agent 1"),
-        Agent(position=(0.75, 0.25), secretion_rate=15.0, kernel_width=0.03, name="Agent 2"),
-        Agent(position=(0.5, 0.75), secretion_rate=8.0, kernel_width=0.03, name="Agent 3"),
+        Agent(position=(0.25, 0.25), net_rate=10.0, kernel_width=0.03, name="Agent 1"),
+        Agent(position=(0.75, 0.25), net_rate=15.0, kernel_width=0.03, name="Agent 2"),
+        Agent(position=(0.5, 0.75), net_rate=8.0, kernel_width=0.03, name="Agent 3"),
     ]
     
     for agent in agents:

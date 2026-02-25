@@ -10,23 +10,23 @@ class TestAgentInitialization:
     
     def test_1d_agent(self):
         """Test creating a 1D agent."""
-        agent = Agent(position=(0.5,), secretion_rate=1.0)
+        agent = Agent(position=(0.5,), net_rate=1.0)
         
         assert agent.position == (0.5,)
-        assert agent.secretion_rate == 1.0
+        assert agent.net_rate == 1.0
         assert agent.kernel_width is None
     
     def test_2d_agent(self):
         """Test creating a 2D agent."""
-        agent = Agent(position=(0.5, 0.3), secretion_rate=5.0, kernel_width=0.1)
+        agent = Agent(position=(0.5, 0.3), net_rate=5.0, kernel_width=0.1)
         
         assert agent.position == (0.5, 0.3)
-        assert agent.secretion_rate == 5.0
+        assert agent.net_rate == 5.0
         assert agent.kernel_width == 0.1
     
     def test_3d_agent(self):
         """Test creating a 3D agent."""
-        agent = Agent(position=(0.1, 0.2, 0.3), secretion_rate=2.0, name="TestAgent")
+        agent = Agent(position=(0.1, 0.2, 0.3), net_rate=2.0, name="TestAgent")
         
         assert agent.position == (0.1, 0.2, 0.3)
         assert agent.name == "TestAgent"
@@ -36,11 +36,11 @@ class TestAgentInitialization:
         def rate_func(t):
             return t**2
         
-        agent = Agent(position=(0.5,), secretion_rate=rate_func)
+        agent = Agent(position=(0.5,), net_rate=rate_func)
         
-        assert agent.get_secretion_rate(0.0) == 0.0
-        assert agent.get_secretion_rate(2.0) == pytest.approx(4.0)
-        assert agent.get_secretion_rate(3.0) == pytest.approx(9.0)
+        assert agent.get_net_rate(0.0) == 0.0
+        assert agent.get_net_rate(2.0) == pytest.approx(4.0)
+        assert agent.get_net_rate(3.0) == pytest.approx(9.0)
 
 
 class TestAgentSource:
@@ -48,7 +48,7 @@ class TestAgentSource:
     
     def test_1d_point_source(self):
         """Test 1D point source."""
-        agent = Agent(position=(0.5,), secretion_rate=10.0, kernel_width=None)
+        agent = Agent(position=(0.5,), net_rate=10.0, kernel_width=None)
         
         # Create coordinate grid
         x = np.linspace(0, 1, 11)
@@ -67,7 +67,7 @@ class TestAgentSource:
     
     def test_2d_gaussian_source(self):
         """Test 2D Gaussian source."""
-        agent = Agent(position=(0.5, 0.5), secretion_rate=1.0, kernel_width=0.1)
+        agent = Agent(position=(0.5, 0.5), net_rate=1.0, kernel_width=0.1)
         
         # Create coordinate grids
         x = np.linspace(0, 1, 21)
@@ -88,9 +88,9 @@ class TestAgentSource:
         # Should decay with distance
         assert source[center_idx, center_idx] > source[center_idx + 5, center_idx]
     
-    def test_zero_secretion_rate(self):
+    def test_zero_net_rate(self):
         """Test agent with zero secretion rate."""
-        agent = Agent(position=(0.5,), secretion_rate=0.0)
+        agent = Agent(position=(0.5,), net_rate=0.0)
         
         x = np.linspace(0, 1, 11)
         dx = (0.1,)
@@ -102,7 +102,7 @@ class TestAgentSource:
     
     def test_3d_gaussian_source(self):
         """Test 3D Gaussian source."""
-        agent = Agent(position=(0.5, 0.5, 0.5), secretion_rate=5.0, kernel_width=0.2)
+        agent = Agent(position=(0.5, 0.5, 0.5), net_rate=5.0, kernel_width=0.2)
         
         # Create coordinate grids
         N = 11
@@ -135,7 +135,7 @@ class TestAgentMethods:
     
     def test_set_position(self):
         """Test updating agent position."""
-        agent = Agent(position=(0.5, 0.5), secretion_rate=1.0)
+        agent = Agent(position=(0.5, 0.5), net_rate=1.0)
         
         agent.set_position((0.8, 0.3))
         
@@ -143,29 +143,29 @@ class TestAgentMethods:
     
     def test_set_position_wrong_dimension(self):
         """Test that wrong dimension raises error."""
-        agent = Agent(position=(0.5, 0.5), secretion_rate=1.0)
+        agent = Agent(position=(0.5, 0.5), net_rate=1.0)
         
         with pytest.raises(ValueError, match="dimension mismatch"):
             agent.set_position((0.5,))  # Wrong dimension
     
-    def test_set_secretion_rate(self):
+    def test_set_net_rate(self):
         """Test updating secretion rate."""
-        agent = Agent(position=(0.5,), secretion_rate=1.0)
+        agent = Agent(position=(0.5,), net_rate=1.0)
         
-        agent.set_secretion_rate(5.0)
+        agent.set_net_rate(5.0)
         
-        assert agent.secretion_rate == 5.0
+        assert agent.net_rate == 5.0
     
-    def test_set_negative_secretion_rate(self):
+    def test_set_negative_net_rate(self):
         """Test that negative rate raises error."""
-        agent = Agent(position=(0.5,), secretion_rate=1.0)
+        agent = Agent(position=(0.5,), net_rate=1.0)
         
         with pytest.raises(ValueError, match="non-negative"):
-            agent.set_secretion_rate(-1.0)
+            agent.set_net_rate(-1.0)
     
     def test_repr(self):
         """Test string representation."""
-        agent = Agent(position=(0.5, 0.3), secretion_rate=2.5, name="MyAgent")
+        agent = Agent(position=(0.5, 0.3), net_rate=2.5, name="MyAgent")
         
         repr_str = repr(agent)
         
@@ -179,8 +179,8 @@ class TestAgentIntegration:
     
     def test_multiple_agents_additive(self):
         """Test that multiple agents' sources add up."""
-        agent1 = Agent(position=(0.3,), secretion_rate=1.0, kernel_width=0.05)
-        agent2 = Agent(position=(0.7,), secretion_rate=1.0, kernel_width=0.05)
+        agent1 = Agent(position=(0.3,), net_rate=1.0, kernel_width=0.05)
+        agent2 = Agent(position=(0.7,), net_rate=1.0, kernel_width=0.05)
         
         x = np.linspace(0, 1, 51)
         dx = (0.02,)

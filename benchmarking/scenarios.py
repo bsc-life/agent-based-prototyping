@@ -156,9 +156,11 @@ def _build_agents(agents_spec: Union[List[Dict[str, Any]], List[Agent], List[Com
         Agent specifications.
         If list of dict, each dict should have:
             - 'position': tuple of coordinates
-            - 'secretion_rate': float or callable (optional, default 1.0)
-            - 'uptake_rate': float or callable (optional, default 0.0)
-            - 'saturation_density': float (optional, default 0.0)
+            - For simple Agent: 'net_rate' (float or callable, optional, default 1.0)
+            - For CompleteAgent (if 'saturation_density' is present):
+                - 'secretion_rate': float or callable (optional, default 1.0)
+                - 'uptake_rate': float or callable (optional, default 0.0)
+                - 'saturation_density': float (required to trigger CompleteAgent, default 0.0)
             - 'kernel_width': float or None (optional, default None = point source)
             - 'name': str (optional)
         If list of Agent instances, returns as-is.
@@ -167,7 +169,7 @@ def _build_agents(agents_spec: Union[List[Dict[str, Any]], List[Agent], List[Com
     Returns
     -------
     list of Agent
-        List of agent objects.
+        List of agent objects (Agent or CompleteAgent instances).
     """
     if agents_spec is None:
         return []
@@ -185,18 +187,28 @@ def _build_agents(agents_spec: Union[List[Dict[str, Any]], List[Agent], List[Com
         use_complete_agent = (
             'saturation_density' in agent_spec
         )
-        agent_class = CompleteAgent if use_complete_agent else Agent
-        agent_kwargs = {
-            'position': agent_spec['position'],
-            'secretion_rate': agent_spec.get('secretion_rate', 1.0),
-            'kernel_width': agent_spec.get('kernel_width', None),
-            'name': agent_spec.get('name', '')
-        }
+        
         if use_complete_agent:
-            agent_kwargs['uptake_rate'] = agent_spec.get('uptake_rate', 0.0)
-            agent_kwargs['saturation_density'] = agent_spec.get('saturation_density', 0.0)
-
-        agent = agent_class(**agent_kwargs)
+            # CompleteAgent uses secretion/uptake, not net_rate
+            agent_kwargs = {
+                'position': agent_spec['position'],
+                'secretion_rate': agent_spec.get('secretion_rate', 1.0),
+                'uptake_rate': agent_spec.get('uptake_rate', 0.0),
+                'saturation_density': agent_spec.get('saturation_density', 0.0),
+                'kernel_width': agent_spec.get('kernel_width', None),
+                'name': agent_spec.get('name', '')
+            }
+            agent = CompleteAgent(**agent_kwargs)
+        else:
+            # Simple Agent uses net_rate
+            agent_kwargs = {
+                'position': agent_spec['position'],
+                'net_rate': agent_spec.get('net_rate', 1.0),
+                'kernel_width': agent_spec.get('kernel_width', None),
+                'name': agent_spec.get('name', '')
+            }
+            agent = Agent(**agent_kwargs)
+        
         agents.append(agent)
     
     return agents
@@ -681,7 +693,7 @@ STEADY_STATE_AGENT_1D = {
     'agents': [
         {
             'position': (0.33,), # Must be an iterable
-            'secretion_rate': 1.0 # Secretion rate of the point source agent
+            'net_rate': 1.0 # Net rate of the point source agent
         }
     ],
     
@@ -720,7 +732,7 @@ STEADY_STATE_AGENT_2D = {
     'agents': [
         {
             'position': [0.33, 0.33],
-            'secretion_rate': 1.0        # Secretion rate of the point source agent
+            'net_rate': 1.0        # Net rate of the point source agent
         }
     ],
     
