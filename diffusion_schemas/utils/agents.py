@@ -342,7 +342,7 @@ class CompleteAgent(Agent):
         
         # 3. Calculate Net Rate
         # Term 1: Supply (stops if rho_local = rho_star)
-        supply_term = S_k * (rho_star - rho_local)
+        supply_term = max(0.0, S_k * (rho_star - rho_local))
         
         # Term 2: Uptake (proportional to available density)
         uptake_term = U_k * rho_local
