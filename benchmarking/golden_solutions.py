@@ -158,6 +158,15 @@ def create_numerical_reference(
             for agent in agents:
                 schema.add_agent(agent)
     
+    # Set bulk regions if present
+    bulk = scenario_params.get('bulk', None)
+    if bulk is not None:
+        if isinstance(bulk, dict):
+            from benchmarking.scenarios import _build_bulk
+            bulk = _build_bulk(bulk)
+        schema.set_bulk(bulk)
+
+    print(f"Running {schema.__class__.__name__} high-resolution reference simulation with dx={dx_ref}, dt={dt_ref} for t_final={t_final}...")
     # Run simulation to t_final AND capture the history list
     history_list = schema.solve(t_final, store_history=True)
     
@@ -181,6 +190,7 @@ def create_numerical_reference(
             np.linspace(0, domain_size[1], refined_grid_points[1]),
             np.linspace(0, domain_size[2], refined_grid_points[2])
         ]
+
     
     return NumericalReferenceSolution(
         time_array=time_array,

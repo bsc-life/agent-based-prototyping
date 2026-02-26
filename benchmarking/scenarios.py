@@ -14,6 +14,7 @@ from diffusion_schemas.utils.boundary import (
     DirichletBC, NeumannBC, PeriodicBC, RobinBC, BoundaryCondition
 )
 from diffusion_schemas.utils.agents import Agent, CompleteAgent
+from diffusion_schemas.utils.bulk import Bulk, Region, RectangleRegion, SphereRegion
 from benchmarking.golden_solutions import (
     GoldenSolution, GaussianDiffusion1D, GaussianDiffusion2D, GaussianDiffusion3D, StepFunctionDiffusion1D,
     create_golden_solution_from_dict
@@ -214,6 +215,70 @@ def _build_agents(agents_spec: Union[List[Dict[str, Any]], List[Agent], List[Com
     return agents
 
 
+def _build_bulk(bulk_spec: Union[Dict[str, Any], Bulk, None]) -> Union[Bulk, None]:
+    """
+    Build Bulk object from specification.
+    
+    Parameters
+    ----------
+    bulk_spec : dict, Bulk, or None
+        Bulk specification.
+        If dict, must have 'regions' key with list of region dicts:
+            Each region dict should have:
+                - 'type': 'rectangle' or 'sphere'
+                - 'origin': tuple (for rectangle)
+                - 'size': tuple (for rectangle)
+                - 'center': tuple (for sphere)
+                - 'radius': float (for sphere)
+                - 'net_rate': float or callable (optional, default 0.0)
+                - 'name': str (optional)
+        If Bulk instance, returns as-is.
+        If None, returns None.
+        
+    Returns
+    -------
+    Bulk or None
+        Bulk object containing regions, or None if input is None.
+    """
+    if bulk_spec is None:
+        return None
+    
+    if isinstance(bulk_spec, Bulk):
+        return bulk_spec
+    
+    if isinstance(bulk_spec, dict):
+        bulk = Bulk()
+        
+        regions = bulk_spec.get('regions', [])
+        if not regions:
+            return bulk
+        
+        for region_spec in regions:
+            region_type = region_spec.get('type')
+            name = region_spec.get('name', '')
+            net_rate = region_spec.get('net_rate', 0.0)
+            
+            if region_type == 'rectangle':
+                domain = RectangleRegion(
+                    origin=tuple(region_spec['origin']),
+                    size=tuple(region_spec['size'])
+                )
+            elif region_type == 'sphere':
+                domain = SphereRegion(
+                    center=tuple(region_spec['center']),
+                    radius=region_spec['radius']
+                )
+            else:
+                raise ValueError(f"Unknown region type: {region_type}")
+            
+            region = Region(domain=domain, net_rate=net_rate, name=name)
+            bulk.add_region(region)
+        
+        return bulk
+    
+    raise TypeError(f"Invalid bulk specification type: {type(bulk_spec)}")
+
+
 def _build_golden_solution(golden_spec: Union[Dict[str, Any], GoldenSolution, Callable]) -> Union[GoldenSolution, Callable]:
     """
     Build golden solution from specification.
@@ -247,6 +312,7 @@ def create_scenario(name: str,
                    decay_rate: float = 0.0,
                    boundary_condition: Union[Dict[str, Any], BoundaryCondition, None] = None,
                    agents: Union[List[Dict[str, Any]], List[Agent], None] = None,
+                   bulk: Union[Dict[str, Any], Bulk, None] = None,
                    **metadata) -> Dict[str, Any]:
     """
     Create a test scenario specification.
@@ -278,6 +344,8 @@ def create_scenario(name: str,
         Boundary condition specification (default None = zero-flux).
     agents : list of dict, list of Agent, or None, optional
         Agent specifications (default None = no agents).
+    bulk : dict, Bulk, or None, optional
+        Bulk region specifications (default None = no bulk regions).
     **metadata : additional keyword arguments
         Additional metadata to store with scenario (e.g., description, tags).
         
@@ -297,6 +365,7 @@ def create_scenario(name: str,
         'initial_condition': initial_condition,
         'boundary_condition': boundary_condition,
         'agents': agents,
+        'bulk': bulk,
         'golden_solution': golden_solution,
         **metadata
     }
@@ -315,6 +384,7 @@ def create_scenario_with_numerical_reference(
     decay_rate: float = 0.0,
     boundary_condition: Union[Dict[str, Any], BoundaryCondition, None] = None,
     agents: Union[List[Dict[str, Any]], List[Agent], None] = None,
+    bulk: Union[Dict[str, Any], Bulk, None] = None,
     # dx_refinement_factor: int = 10,
     # dt_refinement_factor: int = 10,
     dx_ref: float = 1e-3,
@@ -348,6 +418,8 @@ def create_scenario_with_numerical_reference(
         Boundary condition.
     agents : list or None
         Agent specifications.
+    bulk : dict, Bulk, or None
+        Bulk region specifications.
     dx_refinement_factor : int
         Factor to refine spatial grid for reference (default 10).
     dt_refinement_factor : int
@@ -370,7 +442,8 @@ def create_scenario_with_numerical_reference(
         'decay_rate': decay_rate,
         'initial_condition': initial_condition,
         'boundary_condition': boundary_condition,
-        'agents': agents
+        'agents': agents,
+        'bulk': bulk
     }
     
     # Create the golden solution specification
@@ -378,8 +451,8 @@ def create_scenario_with_numerical_reference(
         'type': 'numerical_reference',
         'schema_class': schema_class,
         'scenario_params': scenario_params,
-        'dx': dx_ref,
-        'dt': dt_ref
+        'dx_ref': dx_ref,
+        'dt_ref': dt_ref
         # 'dx_refinement_factor': dx_refinement_factor,
         # 'dt_refinement_factor': dt_refinement_factor
     }
@@ -397,6 +470,7 @@ def create_scenario_with_numerical_reference(
         decay_rate=decay_rate,
         boundary_condition=boundary_condition,
         agents=agents,
+        bulk=bulk,
         **metadata
     )
 
@@ -419,6 +493,7 @@ def build_scenario_components(scenario: Dict[str, Any]) -> Dict[str, Any]:
         - 'initial_condition': Built IC
         - 'boundary_condition': Built BC
         - 'agents': List of Agent objects
+        - 'bulk': Bulk object or None
         - 'golden_solution': Built golden solution
         Plus all original scenario fields.
     """
@@ -426,9 +501,10 @@ def build_scenario_components(scenario: Dict[str, Any]) -> Dict[str, Any]:
     
     built['initial_condition'] = _build_initial_condition(scenario['initial_condition'])
     built['boundary_condition'] = _build_boundary_condition(scenario['boundary_condition'])
-    built['agents'] = _build_agents(scenario['agents'])
+    built['agents'] = _build_agents(scenario.get('agents', None))
     built['golden_solution'] = _build_golden_solution(scenario['golden_solution'])
-    
+    built['bulk'] = _build_bulk(scenario.get('bulk', None))
+
     return built
 
 

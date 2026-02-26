@@ -102,6 +102,9 @@ class Schema(ABC):
         
         # Agents
         self._agents = []
+
+        # Bulk regions
+        self._bulk = None
         
     @property
     def diffusion_coefficient(self) -> float:
@@ -230,6 +233,25 @@ class Schema(ABC):
         """Remove all agents."""
         self._agents = []
         
+    def set_bulk(self, bulk) -> None:
+        """
+        Set the bulk region.
+        
+        Parameters
+        ----------
+        bulk : Bulk
+            Bulk region object with compute_source method.
+        """
+
+        # Maybe adding a warning like in the agents?
+        # In practice, no erorrs arise as overlap matrix just returns 0 for all voxels
+
+        self._bulk = bulk
+    
+    def clear_bulk(self) -> None:
+        """Remove bulk region."""
+        self._bulk = None
+
     def get_state(self) -> np.ndarray:
         """
         Get the current concentration field.
@@ -312,14 +334,14 @@ class Schema(ABC):
     
     def _compute_source_term(self) -> np.ndarray:
         """
-        Compute the source term from all agents.
+        Compute the source term from all agents and bulk regions.
         
         Returns
         -------
         np.ndarray
             Source term array with same shape as state.
         """
-        if not self._agents:
+        if not self._agents and not self._bulk:
             return np.zeros_like(self.state)
         
         source = np.zeros_like(self.state)
@@ -331,6 +353,13 @@ class Schema(ABC):
             else:
                 source += agent.compute_source(coords, self.dx, self.t)
         
+        if self._bulk is not None:
+            # there is no need to iterate here, as self._bulk is an object itself
+            # and self._bulk.compute_source already computes the contribution from the whole bulk region
+            # by iterating internally over its region list
+            # for bulk in self._bulk:
+            source += self._bulk.compute_source(coords, self.dx, self.t)
+
         return source
     
     def _apply_boundary_conditions(self, state: np.ndarray) -> np.ndarray:

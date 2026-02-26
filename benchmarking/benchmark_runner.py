@@ -179,8 +179,13 @@ class BenchmarkRunner:
             schema.set_boundary_conditions(built_scenario['boundary_condition'])
         
         # Add agents
-        for agent in built_scenario['agents']:
-            schema.add_agent(agent)
+        if built_scenario['agents'] is not None:
+            for agent in built_scenario['agents']:
+                schema.add_agent(agent)
+
+        # Add bulk regions
+        if built_scenario['bulk'] is not None:
+            schema.set_bulk(built_scenario['bulk'])
         
         # Store initial mass for conservation check
         initial_mass = np.sum(schema.state)

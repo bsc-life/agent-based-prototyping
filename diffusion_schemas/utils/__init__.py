@@ -7,7 +7,8 @@ from diffusion_schemas.utils.boundary import (
     PeriodicBC,
     RobinBC,
 )
-from diffusion_schemas.utils.agents import Agent
+from diffusion_schemas.utils.agents import Agent, CompleteAgent
+from diffusion_schemas.utils.bulk import Bulk, Region, RectangleRegion, SphereRegion
 from diffusion_schemas.utils.initial_conditions import (
     gaussian,
     uniform,
@@ -25,6 +26,10 @@ __all__ = [
     "RobinBC",
     "Agent",
     "CompleteAgent",
+    "Bulk",
+    "Region",
+    "RectangleRegion",
+    "SphereRegion",
     "gaussian",
     "uniform",
     "step_function",

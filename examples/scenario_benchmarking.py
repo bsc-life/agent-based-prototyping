@@ -215,94 +215,93 @@ def cosine_diffusion():
 
     return results, summary
 
-def custom_scenario():
-
-    scenario = create_scenario_with_numerical_reference(
-        name='Test against high-resolution ADI solution',
-        schema_class=ADIBCSchema,
-
-        domain_size=1.0,
-        grid_points=100,  # Coarse grid for testing
-        dt=0.005,  # Coarse time step
-        t_final=0.2,
-
-        diffusion_coefficient=0.01,
-        decay_rate=0.0,
-
-        initial_condition=lambda x: np.sin(2*np.pi*x/0.1), 
-        boundary_condition={'type': 'neumann', 'flux': 0.0},
-
-        # dx_refinement_factor=10, 
-        # dt_refinement_factor=10
-        dx_ref=0.0005,
-        dt_ref=0.0005
-    )
-
-    runner = BenchmarkRunner()
-
-    # runner.add_schema(ExplicitEulerBCSchema, "Explicit Euler")
-    runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
-    runner.add_schema(ADIBCSchema, "ADI")
-    runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
-    runner.add_schema(CrankNicolsonADIBCSchema, "Crank-Nicolson ADI")
-
-    runner.add_scenario(scenario=scenario)
-    
-    results = runner.run(
-        output_dir='benchmark_results/numerical_reference_test',
-        store_history=True,
-        generate_plots=True
-    )
-    
-    summary = runner.generate_summary_report(
-        output_path='benchmark_results/numerical_reference_test/summary.csv'
-    )
-
-    return results, summary
-
 def custom_agent_scenario():
 
-    # Define a custom scenario with an agent-based source term
-    scenario = create_scenario_with_numerical_reference(
-        name='Custom Agent Scenario',
-        schema_class=ADIBCSchema,
+    # Define a fully customizable scenario
 
-        domain_size=1.0,
-        grid_points=100,
-        dt=0.005,
+    scenario = create_scenario_with_numerical_reference(
+        name='Random Scenario',
+
+        # Schema to take as numerical reference
+        schema_class=ADIBCSchema, 
+        dx_ref=0.001,
+        dt_ref=0.001,
+
+        # Simulation parameters
+        domain_size=(1.0,1.0),
+        grid_points=(50,50),
+        dt=0.001,
         t_final=0.04,
 
+        # Physical parameters
         diffusion_coefficient=0.01,
         decay_rate=0.0,
 
-        initial_condition=uniform(2.0),
+        # Initial and Boundary Conditions
+        # Note IC can be given as a lamba function too
+        # initial_condition=lambda x: np.sin(2*np.pi*x/0.1), 
+        initial_condition=uniform(1.0),
         boundary_condition={'type': 'neumann', 'flux': 0.0},
 
-        agents=[{
-                'position': [0.25,],
-                'secretion_rate': 0.1,
-                'uptake_rate': 0.05,
-                'saturation_density': 1.0
-            }],
+        # Agent addition (could be None)
+        # List of dictionaries indicating agent parameters
+        agents = [
+        #     {
+        #         'position': [0.25,0.85],
+        #         'secretion_rate': 1.0,
+        #         'uptake_rate': 2.0,
+        #         'saturation_density': 0.98,
+        #         'kernel_width': 0.05
+        #     }, 
+        #     {
+        #         'position': [0.35,0.35],
+        #         'secretion_rate': 0.0,
+        #         'uptake_rate': 1.0,
+        #         'saturation_density': 0.98,
+        #         'kernel_width': 0.05
+        #     },
+        #     {
+        #         'position': [0.25,0.25],
+        #         'net_rate': 0.01,
+        #         'kernel_width': 0
+        #     }
+            ],
+
+        # Bulk region addition (could be None)
+        # List of dictionaries indicating bulk region parameters
+        bulk={
+            'regions': [
+                # {
+                #     'type': 'rectangle',
+                #     'origin': (0.5,0.25),
+                #     'size': (0.1,0.4),
+                #     'net_rate': 50
+                # },
+                {   
+                    'type': 'sphere',
+                    'center': (0.8,0.8),
+                    'radius': 0.15,
+                    'net_rate': -3
+                }
+            ]
+        },
         
-        dx_ref=0.0005,
-        dt_ref=0.0001
     )
 
     runner = BenchmarkRunner()
 
-    runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
+    runner.add_schema(ADIBCSchema, "ADI")
 
     runner.add_scenario(scenario=scenario)
     
     results = runner.run(
-        output_dir='benchmark_results/custom_agent_scenario',
+        output_dir='benchmark_results/custom_scenarios',
         store_history=True,
         generate_plots=True
     )
     
     summary = runner.generate_summary_report(
-        output_path='benchmark_results/custom_agent_scenario/summary.csv'
+        output_path='benchmark_results/custom_scenarios/summary.csv'
     )
 
     return results, summary

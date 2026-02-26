@@ -5,7 +5,7 @@ This module implements agents that can secrete substrates into the diffusion
 field at specified locations.
 """
 
-from typing import Tuple, Callable, Optional, List
+from typing import Tuple, Union, Callable, Optional, List
 import numpy as np
 
 
@@ -107,7 +107,7 @@ class Agent:
         
         ndim = len(self.position)
         
-        if self.kernel_width is None:
+        if self.kernel_width is None or self.kernel_width < 1e-6:
             # Point source approximation using delta function
             return self._point_source(coords, dx, rate)
         else:
@@ -169,6 +169,7 @@ class Agent:
             elif ndim == 3:
                 source[indices[0], indices[1], indices[2]] = rate / grid_volume
                 
+            # print(f"Agent '{self.name}' at time {t:.3f}: Placing point source at indices {indices} with rate {rate:.3e}")
             return source
     
     def _gaussian_source(
@@ -283,6 +284,7 @@ class CompleteAgent(Agent):
         """Get current Sk and Uk values at time t."""
         S = self.secretion_rate(t) if callable(self.secretion_rate) else self.secretion_rate
         U = self.uptake_rate(t) if callable(self.uptake_rate) else self.uptake_rate
+        # print(f"Agent '{self.name}' at time {t:.3f}: S_k={S}, U_k={U}")
         return S, U
 
     def _sample_field(
@@ -347,13 +349,14 @@ class CompleteAgent(Agent):
         uptake_term = U_k * rho_local
         
         net_rate = supply_term - uptake_term
+        # print(f"Agent '{self.name}' at time {t:.3f}: rho_local={rho_local:.3e}, supply={supply_term:.3e}, uptake={uptake_term:.3e}, net_rate={net_rate:.3e}")
         
         # If rate is effectively zero, return empty grid
         if abs(net_rate) < 1e-15:
             return np.zeros_like(field)
 
         # 4. Distribute this net rate spatially (Point or Gaussian)
-        if self.kernel_width is None:
+        if self.kernel_width is None or self.kernel_width < 1e-6:
             return self._point_source(coords, dx, net_rate)
         else:
             return self._gaussian_source(coords, net_rate)

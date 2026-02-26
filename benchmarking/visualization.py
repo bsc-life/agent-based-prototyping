@@ -108,7 +108,7 @@ def plot_final_comparison(numerical: np.ndarray,
         
         # Error
         error = numerical - analytical
-        im2 = axes[2].contourf(x, y, error, levels=20, cmap='RdBu_r', center=0)
+        im2 = axes[2].contourf(x, y, error, levels=20, cmap='RdBu_r')
         axes[2].set_xlabel('x')
         axes[2].set_ylabel('y')
         axes[2].set_title('Error (Numerical - Analytical)')
@@ -416,6 +416,8 @@ def plot_time_evolution(history: List[np.ndarray],
             all_values.append(history[idx].min())
             all_values.append(history[idx].max())
         vmin, vmax = min(all_values), max(all_values)
+
+        # vmin, vmax = 0.0, 1.5
         
         for i, idx in enumerate(indices):
             row = i // ncols
@@ -425,7 +427,17 @@ def plot_time_evolution(history: List[np.ndarray],
             t = times[idx]
             numerical = history[idx]
             
-            im = ax.contourf(x, y, numerical, levels=20, cmap='viridis', vmin=vmin, vmax=vmax)
+            # --- ADD CHECKS HERE ---
+            nans = np.isnan(numerical).sum()
+            infs = np.isinf(numerical).sum()
+            if nans > 0 or infs > 0:
+                print(f"Alert at t = {t:.4f}: Found {nans} NaNs and {infs} Infs")
+            # -----------------------
+
+            # countourf faces problems trying to plot results
+            # white spots appear and colorbars do not obey vmin and vmax
+            # im = ax.contourf(x, y, numerical, levels=20, cmap='viridis', vmin=vmin, vmax=vmax)
+            im = ax.pcolormesh(x, y, numerical, vmin=vmin, vmax=vmax, shading='auto')
             ax.set_xlabel('x')
             ax.set_ylabel('y')
             ax.set_title(f't = {t:.4f}')
