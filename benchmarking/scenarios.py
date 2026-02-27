@@ -17,9 +17,13 @@ from diffusion_schemas.utils.agents import Agent, CompleteAgent
 from diffusion_schemas.utils.bulk import Bulk, Region, RectangleRegion, SphereRegion
 from benchmarking.golden_solutions import (
     GoldenSolution, GaussianDiffusion1D, GaussianDiffusion2D, GaussianDiffusion3D, StepFunctionDiffusion1D,
-    create_golden_solution_from_dict
+    create_golden_solution_from_dict,
+    create_numerical_reference_cached
 )
 
+# ==============================================================================
+# Functions to build
+# ==============================================================================
 
 def _build_initial_condition(ic_spec: Union[Dict[str, Any], Callable, np.ndarray, float]) -> Callable:
     """
@@ -94,7 +98,6 @@ def _build_initial_condition(ic_spec: Union[Dict[str, Any], Callable, np.ndarray
         # Already in suitable form (callable, ndarray, or scalar)
         return ic_spec
 
-
 def _build_boundary_condition(bc_spec: Union[Dict[str, Any], BoundaryCondition, None]) -> BoundaryCondition:
     """
     Build boundary condition from specification.
@@ -145,7 +148,6 @@ def _build_boundary_condition(bc_spec: Union[Dict[str, Any], BoundaryCondition, 
             raise ValueError(f"Unknown boundary condition type: {bc_type}")
     
     raise TypeError(f"Invalid boundary condition specification type: {type(bc_spec)}")
-
 
 def _build_agents(agents_spec: Union[List[Dict[str, Any]], List[Agent], List[CompleteAgent], None]) -> List[Agent]:
     """
@@ -214,7 +216,6 @@ def _build_agents(agents_spec: Union[List[Dict[str, Any]], List[Agent], List[Com
     
     return agents
 
-
 def _build_bulk(bulk_spec: Union[Dict[str, Any], Bulk, None]) -> Union[Bulk, None]:
     """
     Build Bulk object from specification.
@@ -278,8 +279,9 @@ def _build_bulk(bulk_spec: Union[Dict[str, Any], Bulk, None]) -> Union[Bulk, Non
     
     raise TypeError(f"Invalid bulk specification type: {type(bulk_spec)}")
 
-
-def _build_golden_solution(golden_spec: Union[Dict[str, Any], GoldenSolution, Callable]) -> Union[GoldenSolution, Callable]:
+def _build_golden_solution(golden_spec: Union[Dict[str, Any], GoldenSolution, Callable],
+                           scenario_params: Union[Dict[str, Any], None] = None
+                           ) -> Union[GoldenSolution, Callable]:
     """
     Build golden solution from specification.
     
@@ -295,11 +297,22 @@ def _build_golden_solution(golden_spec: Union[Dict[str, Any], GoldenSolution, Ca
     GoldenSolution or callable
         Golden solution object or evaluation function.
     """
-    if isinstance(golden_spec, dict):
-        return create_golden_solution_from_dict(golden_spec)
-    else:
-        return golden_spec
 
+    # Previous implementation did not allow for numerical reference without specifying scenario_params in the golden_spec dict
+    # if isinstance(golden_spec, dict):
+    #     # Need to build it from dict specification
+    #     # Numerical reference!
+    #     return create_golden_solution_from_dict(golden_spec)
+    # else:
+    #     return golden_spec
+    
+    if isinstance(golden_spec, dict):
+        if golden_spec.get('type') == 'numerical_reference' and 'scenario_params' not in golden_spec:
+            if scenario_params is None:
+                raise ValueError("numerical_reference requires scenario_params")
+            golden_spec = {**golden_spec, 'scenario_params': scenario_params}
+        return create_golden_solution_from_dict(golden_spec)
+    return golden_spec
 
 def create_scenario(name: str,
                    domain_size: Union[float, Tuple[float, ...]],
@@ -474,6 +487,75 @@ def create_scenario_with_numerical_reference(
         **metadata
     )
 
+
+def create_scenario_with_numerical_reference_cached(
+    name: str,
+    schema_class,
+    domain_size: Union[float, Tuple[float, ...]],
+    grid_points: Union[int, Tuple[int, ...]],
+    dt: float,
+    t_final: float,
+    initial_condition: Union[Dict[str, Any], Callable, np.ndarray, float],
+    diffusion_coefficient: float = 1.0,
+    decay_rate: float = 0.0,
+    boundary_condition: Union[Dict[str, Any], BoundaryCondition, None] = None,
+    agents: Union[List[Dict[str, Any]], List[Agent], None] = None,
+    bulk: Union[Dict[str, Any], Bulk, None] = None,
+    dx_ref: float = 1e-3,
+    dt_ref: float = 1e-3,
+    cache_dir: str = 'benchmark_results/.golden_cache',
+    **metadata
+) -> Dict[str, Any]:
+    """
+    Same as create_scenario_with_numerical_reference, but the golden solution
+    is computed once and cached to disk.  Subsequent calls with identical
+    parameters load from cache in ~1 s instead of recomputing.
+
+    All parameters are identical to create_scenario_with_numerical_reference,
+    with the addition of *cache_dir* (default 'benchmark_results/.golden_cache').
+    """
+    # Build the same scenario_params dict used by the original function
+    scenario_params = {
+        'name': name,
+        'domain_size': domain_size,
+        'grid_points': grid_points,
+        'dt': dt,
+        't_final': t_final,
+        'diffusion_coefficient': diffusion_coefficient,
+        'decay_rate': decay_rate,
+        'initial_condition': initial_condition,
+        'boundary_condition': boundary_condition,
+        'agents': agents,
+        'bulk': bulk
+    }
+
+    # Compute or load the golden solution
+    golden_solution = create_numerical_reference_cached(
+        schema_class=schema_class,
+        scenario_params=scenario_params,
+        dx_ref=dx_ref,
+        dt_ref=dt_ref,
+        cache_dir=cache_dir
+    )
+
+    # Build the scenario with the already-resolved golden solution object
+    return create_scenario(
+        name=name,
+        domain_size=domain_size,
+        grid_points=grid_points,
+        dt=dt,
+        t_final=t_final,
+        initial_condition=initial_condition,
+        golden_solution=golden_solution,
+        diffusion_coefficient=diffusion_coefficient,
+        decay_rate=decay_rate,
+        boundary_condition=boundary_condition,
+        agents=agents,
+        bulk=bulk,
+        **metadata
+    )
+
+
 def build_scenario_components(scenario: Dict[str, Any]) -> Dict[str, Any]:
     """
     Build actual objects from scenario specification.
@@ -499,14 +581,19 @@ def build_scenario_components(scenario: Dict[str, Any]) -> Dict[str, Any]:
     """
     built = scenario.copy()
     
+    scenario_params = {
+        k: v for k, v in scenario.items()
+        if k not in ('name', 'description', 'golden_solution')
+    }
+
     built['initial_condition'] = _build_initial_condition(scenario['initial_condition'])
     built['boundary_condition'] = _build_boundary_condition(scenario['boundary_condition'])
     built['agents'] = _build_agents(scenario.get('agents', None))
-    built['golden_solution'] = _build_golden_solution(scenario['golden_solution'])
+    built['golden_solution'] = _build_golden_solution(scenario.get('golden_solution'), 
+                                                      scenario_params = scenario_params)
     built['bulk'] = _build_bulk(scenario.get('bulk', None))
 
     return built
-
 
 # ==============================================================================
 # Default Scenarios
@@ -554,7 +641,6 @@ GAUSSIAN_PULSE_2D = {
     }
 }
 
-
 # 1D Gaussian pulse for simpler testing
 GAUSSIAN_PULSE_1D = {
     'name': 'gaussian_pulse_1d',
@@ -590,7 +676,6 @@ GAUSSIAN_PULSE_1D = {
         'diffusion_coefficient': 0.01
     }
 }
-
 
 # 3D Gaussian pulse for testing higher dimensions
 GAUSSIAN_PULSE_3D = {
@@ -632,7 +717,6 @@ GAUSSIAN_PULSE_3D = {
 # Add-ons for additional testing
 # ==============================================================================
 
-# We need to define a new golden solution for the step function case
 STEP_FUNCTION_1D = {
     'name': 'step_function_1d',
     'description': '1D step diffusion with zero-flux boundaries',
@@ -763,7 +847,7 @@ STEADY_STATE_AGENT_1D = {
     
     'boundary_condition': {
         'type': 'dirichlet',       # Approximating u -> 0 at infinite distance
-        'values': [0.0, 0.0, 0.0, 0.0]
+        'value': [0.0, 0.0, 0.0, 0.0]
     },
     
     'agents': [
@@ -802,7 +886,7 @@ STEADY_STATE_AGENT_2D = {
     
     'boundary_condition': {
         'type': 'dirichlet',       # Approximating u -> 0 at infinite distance
-        'values': [0.0, 0.0, 0.0, 0.0]
+        'value': [0.0, 0.0, 0.0, 0.0]
     },
     
     'agents': [
@@ -842,7 +926,7 @@ SINE_DECAY_1D = {
     
     'boundary_condition': {
         'type': 'dirichlet',
-        'values': [0.0, 0.0]
+        'value': [0.0, 0.0]
     },
     
     'agents': None,
@@ -855,8 +939,8 @@ SINE_DECAY_1D = {
     }
 }
 
-# BioFVM convergence test 1: 1D diffusion with cosine initial condition and zero-flux boundaries
 COSINE_DIFFUSION_1D = {
+    # BioFVM convergence test 1: 1D diffusion with cosine initial condition and zero-flux boundaries
     'name': 'cosine_diffusion_1d',
     'description': 'First convergence test',
     
@@ -875,7 +959,7 @@ COSINE_DIFFUSION_1D = {
     
     'boundary_condition': {
         'type': 'neumann',
-        'values': 0.0
+        'value': 0.0
     },
     
     'agents': None,
@@ -884,7 +968,55 @@ COSINE_DIFFUSION_1D = {
 }
 
 # ==============================================================================
-# Functions
+# Complex examples
+# ==============================================================================
+
+SINGLE_TUMOR_2D = {
+    'name': 'single_tumor_2d',
+    'description': '2D diffusion with decay and a single tumor region secreting continuously',
+    
+    # NOTE TIME UNITS ARE IN MINUTES
+    'domain_size': (2000.0, 2000.0),
+    'grid_points': (2000.0/20, 2000.0/20),
+    'dt': 0.01,
+    't_final': 64800,
+    
+    'diffusion_coefficient': float(1e5), # Diffusion coefficient in μm^2/min (typical for oxygen in tissue)
+    'decay_rate': 0.1,
+    
+    'initial_condition': {
+        'type': 'uniform',
+        'value': 38.0
+    },
+    
+    'boundary_condition': {
+        'type': 'dirichlet',
+        'value': 38.0
+    },
+        
+    'bulk': {
+        'regions': [
+            {
+                'type': 'sphere',
+                'center': (0.5, 0.5),
+                'radius': 250.0,
+                'net_rate': -10.0, 
+                'name': 'tumor_region'
+            }
+        ]
+    },
+    
+    # No analytical solution for this complex scenario
+    'golden_solution': {
+        'type': 'numerical_reference',
+        'schema_class': None, # Will use ADIBCSchema by default
+        'dx_ref': 10.0, # Finer spatial resolution for reference
+        'dt_ref': 0.0001
+    }
+}
+
+# ==============================================================================
+# Functions to retrieve built scenarios
 # ==============================================================================
 
 def get_default_scenarios() -> List[Dict[str, Any]]:
@@ -931,7 +1063,8 @@ def get_scenario_by_name(name: str) -> Dict[str, Any]:
         'steady_state_agent_2d': STEADY_STATE_AGENT_2D,
         'exponential_decay_1d': EXPONENTIAL_DECAY_1D,
         'sine_decay_1d': SINE_DECAY_1D,
-        'cosine_diffusion_1d': COSINE_DIFFUSION_1D
+        'cosine_diffusion_1d': COSINE_DIFFUSION_1D,
+        'single_tumor_2d': SINGLE_TUMOR_2D
     }
     
     if name not in scenarios:

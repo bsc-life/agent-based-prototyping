@@ -11,6 +11,12 @@ import numpy as np
 import warnings
 from diffusion_schemas.utils.agents import CompleteAgent
 
+try:
+    from tqdm import tqdm
+    HAS_TQDM = True
+except ImportError:
+    HAS_TQDM = False
+
 
 class Schema(ABC):
     """
@@ -277,7 +283,7 @@ class Schema(ABC):
         """
         pass
     
-    def solve(self, t_final: float, store_history: bool = False) -> Optional[List[np.ndarray]]:
+    def solve(self, t_final: float, store_history: bool = False, progress: bool = False) -> Optional[List[np.ndarray]]:
         """
         Solve the diffusion equation up to a final time.
         
@@ -287,6 +293,9 @@ class Schema(ABC):
             Final time to integrate to.
         store_history : bool, optional
             If True, store and return the state at each time step.
+            Default is False.
+        progress : bool, optional
+            If True, display a progress bar (requires tqdm).
             Default is False.
             
         Returns
@@ -303,6 +312,14 @@ class Schema(ABC):
         if store_history:
             history.append(self.state.copy())
         
+        n_steps = int(np.ceil((t_final - self.t) / self.dt))
+        pbar = None
+        if progress and HAS_TQDM:
+            pbar = tqdm(total=n_steps, desc="Solving", unit="step",
+                        dynamic_ncols=True, mininterval=0.5, leave=True)
+        # elif progress and not HAS_TQDM:
+        #     warnings.warn("tqdm not installed: progress bar disabled.")
+
         while self.t < t_final:
             # Adjust last step to hit t_final exactly if needed
             if self.t + self.dt > t_final:
@@ -329,7 +346,15 @@ class Schema(ABC):
             
             if store_history:
                 history.append(self.state.copy())
+            
+            # At each step, update the progress bar if enabled
+            if pbar is not None:
+                pbar.update(1)
         
+        # Close progress bar if it was used
+        if pbar is not None:
+            pbar.close()
+
         return history
     
     def _compute_source_term(self) -> np.ndarray:

@@ -200,7 +200,7 @@ class BenchmarkRunner:
         
         # Run simulation
         start_time = time.time()
-        history = schema.solve(scenario['t_final'], store_history=store_history)
+        history = schema.solve(scenario['t_final'], store_history=store_history, progress = True)
         duration = time.time() - start_time
         
         # Compute times array if history was stored

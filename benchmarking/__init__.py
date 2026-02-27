@@ -60,6 +60,7 @@ from benchmarking.test_suite import (
 from benchmarking.scenarios import (
     create_scenario,
     create_scenario_with_numerical_reference,
+    create_scenario_with_numerical_reference_cached,
     get_default_scenarios,
     get_scenario_by_name,
     build_scenario_components,
@@ -77,6 +78,7 @@ from benchmarking.scenarios import (
 # Analytical solutions
 from benchmarking.golden_solutions import (
     GoldenSolution,
+    NumericalReferenceSolution,
     GaussianDiffusion1D,
     GaussianDiffusion2D,
     GaussianDiffusion3D,
@@ -85,7 +87,8 @@ from benchmarking.golden_solutions import (
     StepFunctionDiffusion1D,
     StepFunctionDiffusion2D,
     SineDecay1D,
-    create_golden_solution_from_dict
+    create_golden_solution_from_dict,
+    create_numerical_reference_cached
 )
 
 # Error metrics
@@ -122,6 +125,7 @@ __all__ = [
     # Scenario creation
     'create_scenario',
     'create_scenario_with_numerical_reference',
+    'create_scenario_with_numerical_reference_cached',
     'get_default_scenarios',
     'get_scenario_by_name',
     'build_scenario_components',
@@ -138,7 +142,9 @@ __all__ = [
     'GaussianDiffusion3D',
     'ExponentialDecay',
     'SteadyStateAgentDiffusion',
+    'NumericalReferenceSolution',
     'create_golden_solution_from_dict',
+    'create_numerical_reference_cached',
     
     # Error metrics
     'compute_l2_error',
