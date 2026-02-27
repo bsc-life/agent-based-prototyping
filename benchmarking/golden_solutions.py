@@ -5,6 +5,10 @@ This module provides analytical solutions to diffusion equations that can be use
 as reference solutions for testing numerical methods.
 """
 
+from pathlib import Path
+import hashlib
+import json
+
 import numpy as np
 from abc import ABC, abstractmethod
 from typing import Callable, List, Tuple, Union, Dict, Any
@@ -94,6 +98,31 @@ class NumericalReferenceSolution(GoldenSolution):
     def get_description(self) -> str:
         return f"Time-Aware High-Resolution Numerical Reference ({self.ndim}D)"
 
+    def save(self, filepath: str):
+        """Save the golden solution to a compressed .npz file on disk."""
+        filepath = Path(filepath)
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        save_dict = {
+            'history': self.interpolator.values,
+            'time': self.time_array,
+            'n_spatial_axes': len(self.spatial_coords),
+        }
+        for i, ax in enumerate(self.spatial_coords):
+            save_dict[f'spatial_axis_{i}'] = np.asarray(ax)
+        np.savez_compressed(str(filepath), **save_dict)
+        print(f"  Golden solution saved to {filepath}")
+
+    @classmethod
+    def load(cls, filepath: str) -> 'NumericalReferenceSolution':
+        """Load a golden solution from a .npz file."""
+        data = np.load(filepath, allow_pickle=True)
+        n_axes = int(data['n_spatial_axes'])
+        coords = [data[f'spatial_axis_{i}'] for i in range(n_axes)]
+        return cls(
+            time_array=data['time'],
+            reference_grid_coords=coords,
+            reference_history_array=data['history']
+        )
 
 def create_numerical_reference(
     schema_class,
@@ -102,7 +131,7 @@ def create_numerical_reference(
     # dt_refinement_factor: int = 10,
     dx_ref: float = 1e-3,
     dt_ref: float = 1e-3
-) -> NumericalReferenceSolution:
+    ) -> NumericalReferenceSolution:
     
     # Extract parameters
     domain_size = scenario_params['domain_size']
@@ -166,7 +195,7 @@ def create_numerical_reference(
             bulk = _build_bulk(bulk)
         schema.set_bulk(bulk)
 
-    print(f"Running {schema.__class__.__name__} high-resolution reference simulation with dx={dx_ref}, dt={dt_ref} for t_final={t_final}...")
+    # print(f"Running {schema.__class__.__name__} high-resolution reference simulation with dx={dx_ref}, dt={dt_ref} for t_final={t_final}...")
     # Run simulation to t_final AND capture the history list
     history_list = schema.solve(t_final, store_history=True)
     
@@ -197,6 +226,70 @@ def create_numerical_reference(
         reference_grid_coords=coords,
         reference_history_array=history_array
     )
+
+
+def create_numerical_reference_cached(
+    schema_class,
+    scenario_params: Dict[str, Any],
+    dx_ref: float = 1e-3,
+    dt_ref: float = 1e-3,
+    cache_dir: str = 'benchmark_results/.golden_cache'
+) -> NumericalReferenceSolution:
+    """
+    Same as create_numerical_reference, but caches the result to disk.
+
+    On the first call for a given set of parameters the golden solution is
+    computed and saved as a compressed .npz file.  Subsequent calls with the
+    same parameters load from cache (~1 s) instead of recomputing.
+
+    Parameters are identical to create_numerical_reference, with the addition
+    of *cache_dir* which controls where cached files are stored.
+    """
+    # Build a deterministic hash from every parameter that affects the result
+    cache_key_data = {
+        'schema_class': schema_class.__name__,
+        'dx_ref': dx_ref,
+        'dt_ref': dt_ref,
+        'domain_size': scenario_params.get('domain_size'),
+        'grid_points': scenario_params.get('grid_points'),
+        'dt': scenario_params.get('dt'),
+        't_final': scenario_params.get('t_final'),
+        'diffusion_coefficient': scenario_params.get('diffusion_coefficient'),
+        'decay_rate': scenario_params.get('decay_rate'),
+        'initial_condition': str(scenario_params.get('initial_condition')),
+        'boundary_condition': str(scenario_params.get('boundary_condition')),
+        'bulk': str(scenario_params.get('bulk')),
+        'agents': str(scenario_params.get('agents')),
+    }
+    cache_hash = hashlib.sha256(
+        json.dumps(cache_key_data, sort_keys=True, default=str).encode()
+    ).hexdigest()[:16]
+
+    scenario_name = scenario_params.get('name', 'reference')
+    cache_path = Path(cache_dir) / f"{scenario_name}_{cache_hash}.npz"
+
+    # Try loading from cache
+    if cache_path.exists():
+        print(f"[Cache HIT] Loading golden solution: {cache_path.name}")
+        return NumericalReferenceSolution.load(str(cache_path))
+
+    # Cache miss -> compute from scratch using the original function
+    print(f"[Cache MISS] Computing golden solution for '{scenario_name}'...")
+    print(f"Result will be cached at: {cache_path}")
+
+    reference = create_numerical_reference(
+        schema_class=schema_class,
+        scenario_params=scenario_params,
+        dx_ref=dx_ref,
+        dt_ref=dt_ref
+    )
+
+    reference.save(str(cache_path))
+    return reference
+
+# =====================================================
+# Default Golden Solutions
+# =====================================================
 
 class GaussianDiffusion1D(GoldenSolution):
     """
@@ -296,7 +389,6 @@ class GaussianDiffusion2D(GoldenSolution):
     def get_description(self) -> str:
         return f"2D Gaussian diffusion (D={self.D}, center={self.center}, σ0={self.sigma0})"
 
-
 class GaussianDiffusion3D(GoldenSolution):
     """
     Fundamental solution for 3D diffusion equation with Gaussian initial condition.
@@ -345,7 +437,6 @@ class GaussianDiffusion3D(GoldenSolution):
     def get_description(self) -> str:
         return f"3D Gaussian diffusion (D={self.D}, center={self.center}, σ0={self.sigma0})"
 
-
 class ExponentialDecay(GoldenSolution):
     """
     Solution for pure exponential decay (no diffusion).
@@ -379,7 +470,6 @@ class ExponentialDecay(GoldenSolution):
     
     def get_description(self) -> str:
         return f"Exponential decay (λ={self.decay_rate})"
-
 
 class SteadyStateAgentDiffusion(GoldenSolution):
     """
@@ -748,8 +838,9 @@ def create_golden_solution_from_dict(spec: Dict[str, Any]) -> GoldenSolution:
             )
         else:
             # Need to build it
+            from diffusion_schemas.methods_BC import ADIBCSchema # default reference schema class if not specified
             return create_numerical_reference(
-                schema_class=spec['schema_class'],
+                schema_class=spec.get('schema_class') or ADIBCSchema, # returns left operand if not None, otherwise the right operand
                 scenario_params=spec['scenario_params'],
                 # dx_refinement_factor=spec.get('dx_refinement_factor', 10),
                 # dt_refinement_factor=spec.get('dt_refinement_factor', 10)
