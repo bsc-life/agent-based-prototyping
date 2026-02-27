@@ -233,7 +233,7 @@ class ExplicitEulerBCSchema(Schema):
                 laplacian[:, 0] = 0
                 laplacian[:, -1] = 0
 
-            if isinstance(self._boundary_conditions, NeumannBC):
+            elif isinstance(self._boundary_conditions, NeumannBC):
                 # Assuming same flux across al boundaries for simplicity
                 # Use ghost-point one-sided formulas
                 # Convention: u[i, j] = u[x_i, y_j]
@@ -309,7 +309,7 @@ class ExplicitEulerBCSchema(Schema):
                 laplacian[:, :, 0] = 0
                 laplacian[:, :, -1] = 0
 
-            if isinstance(self._boundary_conditions, NeumannBC):
+            elif isinstance(self._boundary_conditions, NeumannBC):
                 # Assuming same flux across all boundaries for simplicity
                 flux = self._boundary_conditions._get_flux(self.t)
 

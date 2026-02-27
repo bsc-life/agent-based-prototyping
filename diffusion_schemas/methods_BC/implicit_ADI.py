@@ -7,7 +7,7 @@ unconditional stability.
 """
 
 import numpy as np
-from scipy.sparse import diags, eye, csr_matrix
+from scipy.sparse import diags, eye, csr_matrix, lil_matrix
 from scipy.sparse.linalg import spsolve
 from diffusion_schemas.base import Schema
 from diffusion_schemas.utils.boundary import DirichletBC, NeumannBC
@@ -140,17 +140,17 @@ class ADIBCSchema(Schema):
         
         # --------------------- 1D CASE ---------------------
         if self.ndim == 1:
-            Ax = self.system_matrix.copy() # Copy to modify for BCs
+            Ax = self.system_matrix.copy().tolil() # LIL for efficient BC modification
             
             # Apply BC to the single system
             rhs = rhs.reshape(self.grid_points[0], 1) # Ensure 2D column for helper
             rhs = self._apply_bc_to_sweep(Ax, rhs, self.dx[0])
             
-            self.state = spsolve(Ax, rhs).reshape(self.grid_points)
+            self.state = spsolve(Ax.tocsr(), rhs).reshape(self.grid_points)
 
         # --------------------- 2D CASE ---------------------
         elif self.ndim == 2:
-            Ax, Ay = [m.copy() for m in self.system_matrix]
+            Ax, Ay = [m.copy().tolil() for m in self.system_matrix]  # LIL for efficient BC modification
             Nx, Ny = self.grid_points
             
             # --- SWEEP 1: X-Direction ---
@@ -160,7 +160,7 @@ class ADIBCSchema(Schema):
             
             # Apply BCs to the X-System (Left/Right)
             rhs = self._apply_bc_to_sweep(Ax, rhs, self.dx[0])
-            u_star = spsolve(Ax, rhs)
+            u_star = spsolve(Ax.tocsr(), rhs)
             
             # --- SWEEP 2: Y-Direction ---
             # Solve Ay * u^(n+1) = u* for every column x
@@ -170,14 +170,14 @@ class ADIBCSchema(Schema):
             
             # Apply BCs to the Y-System (Bottom/Top)
             rhs_y = self._apply_bc_to_sweep(Ay, rhs_y, self.dx[1])
-            u_new_T = spsolve(Ay, rhs_y)
+            u_new_T = spsolve(Ay.tocsr(), rhs_y)
             
             # Transpose back to (Nx, Ny)
             self.state = u_new_T.T
 
         # --------------------- 3D CASE ---------------------
         elif self.ndim == 3:
-            Ax, Ay, Az = [m.copy() for m in self.system_matrix]
+            Ax, Ay, Az = [m.copy().tolil() for m in self.system_matrix]  # LIL for efficient BC modification
             Nx, Ny, Nz = self.grid_points
             
             # --- SWEEP 1: X-Direction ---
@@ -186,7 +186,7 @@ class ADIBCSchema(Schema):
             
             # Apply BC (Left/Right)
             rhs_x = self._apply_bc_to_sweep(Ax, rhs_x, self.dx[0])
-            u_star = spsolve(Ax, rhs_x)
+            u_star = spsolve(Ax.tocsr(), rhs_x)
             u_star = u_star.reshape(Nx, Ny, Nz)
             
             # --- SWEEP 2: Y-Direction ---
@@ -195,7 +195,7 @@ class ADIBCSchema(Schema):
             
             # Apply BC (Front/Back)
             rhs_y = self._apply_bc_to_sweep(Ay, rhs_y, self.dx[1])
-            u_star_star = spsolve(Ay, rhs_y)
+            u_star_star = spsolve(Ay.tocsr(), rhs_y)
             u_star_star = u_star_star.reshape(Ny, Nx, Nz).transpose(1, 0, 2) # Back to (Nx, Ny, Nz)
             
             # --- SWEEP 3: Z-Direction ---
@@ -204,7 +204,7 @@ class ADIBCSchema(Schema):
             
             # Apply BC (Bottom/Top)
             rhs_z = self._apply_bc_to_sweep(Az, rhs_z, self.dx[2])
-            u_new_T = spsolve(Az, rhs_z)
+            u_new_T = spsolve(Az.tocsr(), rhs_z)
             
             # Transpose back: (Nz, Nx, Ny) -> (Nx, Ny, Nz)
             self.state = u_new_T.reshape(Nz, Nx, Ny).transpose(1, 2, 0)

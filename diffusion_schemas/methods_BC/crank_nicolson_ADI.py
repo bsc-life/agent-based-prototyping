@@ -8,7 +8,7 @@ stencils, avoiding Operator Splitting errors.
 """
 
 import numpy as np
-from scipy.sparse import diags, eye, csr_matrix
+from scipy.sparse import diags, eye, csr_matrix, lil_matrix
 from scipy.sparse.linalg import spsolve
 from diffusion_schemas.base import Schema
 from diffusion_schemas.utils.boundary import DirichletBC, NeumannBC
@@ -199,23 +199,24 @@ class CrankNicolsonADIBCSchema(Schema):
         
         if self.ndim == 1:
             # 1D Case
-            Ax = self.A_impl_x.copy()
+            Ax = self.A_impl_x.copy().tolil()  # LIL for efficient BC modification
             rhs_x = rhs.reshape(self.grid_points[0], 1)
             
             # Apply Implicit BCs
             rhs_x = self._apply_bc_to_sweep(Ax, rhs_x, self.dx[0])
             
-            self.state = spsolve(Ax, rhs_x)
+            self.state = spsolve(Ax.tocsr(), rhs_x)
 
         elif self.ndim == 2:
-            Ax, Ay = self.A_impl_x.copy(), self.A_impl_y.copy()
+            Ax = self.A_impl_x.copy().tolil()  # LIL for efficient BC modification
+            Ay = self.A_impl_y.copy().tolil()
             Nx, Ny = self.grid_points
             rhs = rhs.reshape(Nx,Ny)
 
             # Step 1: Solve (Ax) * u* = rhs (X-Sweep)
             # Apply BCs to X-sweep
             rhs_x = self._apply_bc_to_sweep(Ax, rhs, self.dx[0])
-            u_star = spsolve(Ax, rhs_x)
+            u_star = spsolve(Ax.tocsr(), rhs_x)
             
             # Step 2: Solve (Ay) * u^(n+1) = u* (Y-Sweep)
             # Transpose u_star to solve for Y
@@ -223,31 +224,33 @@ class CrankNicolsonADIBCSchema(Schema):
             # Apply BCs to Y-sweep
             rhs_y = self._apply_bc_to_sweep(Ay, rhs_y, self.dx[1])
             
-            self.state = spsolve(Ay, rhs_y)
+            self.state = spsolve(Ay.tocsr(), rhs_y)
             # Transpose back
             self.state = self.state.T 
 
         elif self.ndim == 3:
-            Ax, Ay, Az = self.A_impl_x.copy(), self.A_impl_y.copy(), self.A_impl_z.copy()
+            Ax = self.A_impl_x.copy().tolil()  # LIL for efficient BC modification
+            Ay = self.A_impl_y.copy().tolil()
+            Az = self.A_impl_z.copy().tolil()
             Nx, Ny, Nz = self.grid_points
             rhs = rhs.reshape(Nx,Ny,Nz)
 
             # Step 1: Solve (Ax) * u* = rhs (X-Sweep)
             rhs_x = rhs.reshape(Nx, Ny * Nz)
             rhs_x = self._apply_bc_to_sweep(Ax, rhs_x, self.dx[0])
-            u_star = spsolve(Ax, rhs_x)
+            u_star = spsolve(Ax.tocsr(), rhs_x)
             u_star = u_star.reshape(Nx, Ny, Nz)
 
             # Step 2: Solve (Ay) * u** = u* (Y-Sweep)
             rhs_y = u_star.transpose(1,0,2).reshape(Ny, Nx * Nz)
             rhs_y = self._apply_bc_to_sweep(Ay, rhs_y, self.dx[1])
-            u_star_star = spsolve(Ay, rhs_y)
+            u_star_star = spsolve(Ay.tocsr(), rhs_y)
             u_star_star = u_star_star.reshape(Ny, Nx, Nz).transpose(1,0,2)
 
             # Step 3: Solve (Az) * u^(n+1) = u** (Z-Sweep)
             rhs_z = u_star_star.transpose(2,0,1).reshape(Nz, Nx * Ny)
             rhs_z = self._apply_bc_to_sweep(Az, rhs_z, self.dx[2])
-            self.state = spsolve(Az, rhs_z)
+            self.state = spsolve(Az.tocsr(), rhs_z)
             self.state = self.state.reshape(Nz, Nx, Ny).transpose(1,2,0)
 
         # Fix return type in step_adi
@@ -330,6 +333,7 @@ class CrankNicolsonADIBCSchema(Schema):
             (u[2:, 1:-1] - 2*u[1:-1, 1:-1] + u[:-2, 1:-1]) / (dx**2)
             + (u[1:-1, 2:] - 2*u[1:-1, 1:-1] + u[1:-1, :-2]) / (dy**2)
         )
+
         if isinstance(self._boundary_conditions, NeumannBC):
             flux = self._boundary_conditions._get_flux(self.t)
             # Left/Right
@@ -347,8 +351,10 @@ class CrankNicolsonADIBCSchema(Schema):
             laplacian[0, -1] = (2*(u[1,-1]-u[0,-1])/dx**2 - 2*flux/dx) + (2*(u[0,-2]-u[0,-1])/dy**2 + 2*flux/dy)
             laplacian[-1, 0] = (2*(u[-2,0]-u[-1,0])/dx**2 + 2*flux/dx) + (2*(u[-1,1]-u[-1,0])/dy**2 - 2*flux/dy)
             laplacian[-1, -1] = (2*(u[-2,-1]-u[-1,-1])/dx**2 + 2*flux/dx) + (2*(u[-1,-2]-u[-1,-1])/dy**2 + 2*flux/dy)
+        
         elif isinstance(self._boundary_conditions, DirichletBC):
             laplacian[0, :] = 0; laplacian[-1, :] = 0; laplacian[:, 0] = 0; laplacian[:, -1] = 0
+        
         else:
             # Default zero flux
             laplacian[0, 1:-1] = (2*(u[1, 1:-1] - u[0, 1:-1])/dx**2) + (u[0, 2:] - 2*u[0, 1:-1] + u[0, :-2])/dy**2
@@ -359,6 +365,7 @@ class CrankNicolsonADIBCSchema(Schema):
             laplacian[0, -1] = 2*(u[1,-1]-u[0,-1])/dx**2 + 2*(u[0,-2]-u[0,-1])/dy**2
             laplacian[-1, 0] = 2*(u[-2,0]-u[-1,0])/dx**2 + 2*(u[-1,1]-u[-1,0])/dy**2
             laplacian[-1, -1] = 2*(u[-2,-1]-u[-1,-1])/dx**2 + 2*(u[-1,-2]-u[-1,-1])/dy**2
+        
         return laplacian
 
     def _laplacian_3d(self, u: np.ndarray) -> np.ndarray:

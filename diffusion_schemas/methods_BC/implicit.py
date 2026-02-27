@@ -7,7 +7,7 @@ solving a linear system at each time step.
 """
 
 import numpy as np
-from scipy.sparse import diags, kron, eye, csr_matrix
+from scipy.sparse import diags, kron, eye, csr_matrix, lil_matrix
 from scipy.sparse.linalg import spsolve
 from diffusion_schemas.base import Schema
 from diffusion_schemas.utils.boundary import DirichletBC, NeumannBC
@@ -156,14 +156,17 @@ class ImplicitEulerBCSchema(Schema):
         # Right-hand side: u^n + dt*S
         rhs = self.state.flatten() + self.dt * source.flatten()
 
-        # Create a copy of the system matrix that could be used for calculations
-        A = self.system_matrix.copy()
+        # Create a copy of the system matrix in LIL format for efficient BC modification
+        A = self.system_matrix.copy().tolil()
                 
         # Apply boundary conditions directly to the system if needed
         if isinstance(self._boundary_conditions, DirichletBC):
             A, rhs = self._apply_dirichlet_bc(A, rhs) # modifies rhs and system matrix
         elif isinstance(self._boundary_conditions, NeumannBC):
             A, rhs = self._apply_neumann_bc(A, rhs)
+
+        # Convert back to CSR for efficient solving
+        A = A.tocsr()
 
         # Solve the linear system: A * u^(n+1) = rhs
         u_new_flat = spsolve(A, rhs)

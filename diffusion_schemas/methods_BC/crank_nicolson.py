@@ -7,7 +7,7 @@ accurate in time.
 """
 
 import numpy as np
-from scipy.sparse import diags, kron, eye, csr_matrix
+from scipy.sparse import diags, kron, eye, csr_matrix, lil_matrix
 from scipy.sparse.linalg import spsolve
 from diffusion_schemas.base import Schema
 from diffusion_schemas.utils.boundary import DirichletBC, NeumannBC
@@ -195,8 +195,8 @@ class CrankNicolsonBCSchema(Schema):
         rhs = rhs.flatten()
 
         # --- IMPLICIT PART (LHS Construction & Solve) ---
-        # Copy matrix to modify it in-place for Neumann ghost points
-        A_system = self.A_impl.copy()
+        # Copy matrix in LIL format for efficient BC modification
+        A_system = self.A_impl.copy().tolil()
 
         # Apply boundary conditions
         if self._boundary_conditions is not None:
@@ -205,6 +205,9 @@ class CrankNicolsonBCSchema(Schema):
             elif isinstance(self._boundary_conditions, NeumannBC):
                 rhs = self._apply_neumann_bc(A_system, rhs)
         
+        # Convert back to CSR for efficient solving
+        A_system = A_system.tocsr()
+
         # Solve the linear system
         u_new_flat = spsolve(A_system, rhs)
         
