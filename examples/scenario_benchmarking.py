@@ -299,12 +299,80 @@ def single_tumour():
     print("=" * 70)
 
     # single_tumor_2d = get_scenario_by_name('single_tumor_2d')  
-    single_tumor_2d = create_scenario_with_numerical_reference(
-        name='single_tumor_2d',
+    single_tumor_2d_dt01 = create_scenario_with_numerical_reference_cached(
+        name='single_tumor_2d_dt01',
+        schema_class=ADIBCSchema, # reference schema class for golden solution
+        domain_size=(2000.0, 2000.0), # assuming in micrometers for a 2mm x 2mm tissue section
+        grid_points=(100, 100), # dx forced to 20 micrometers, leading to a 100x100 grid
+        dt=0.1, # minutes
+        t_final=5, # minutes (64800 minutes = 45 days)
+        initial_condition={
+            'type': 'uniform',
+            'value': 38.0 # mmHg
+        },
+        diffusion_coefficient=float(1e5), # μm^2/min
+        decay_rate=0.1, # per minute
+        boundary_condition={
+            'type': 'dirichlet',
+            'value': 38.0 # mmHg
+        },
+        bulk={
+            'regions': [
+                {
+                    'type': 'sphere',
+                    'center': (1000.0, 1000.0), # center of the domain
+                    'radius': 250.0, # micrometers
+                    'net_rate': -10.0,
+                    'name': 'tumor_region'
+
+                }
+            ]
+        },
+        dx_ref=10.0,
+        dt_ref=0.0001,
+        description='2D diffusion with decay and a single tumor region uptaking continuously'
+    )
+
+    single_tumor_2d_dt001 = create_scenario_with_numerical_reference_cached(
+        name='single_tumor_2d_dt001',
         schema_class=ADIBCSchema, # reference schema class for golden solution
         domain_size=(2000.0, 2000.0), # assuming in micrometers for a 2mm x 2mm tissue section
         grid_points=(100, 100), # dx forced to 20 micrometers, leading to a 100x100 grid
         dt=0.01, # minutes
+        t_final=5, # minutes (64800 minutes = 45 days)
+        initial_condition={
+            'type': 'uniform',
+            'value': 38.0 # mmHg
+        },
+        diffusion_coefficient=float(1e5), # μm^2/min
+        decay_rate=0.1, # per minute
+        boundary_condition={
+            'type': 'dirichlet',
+            'value': 38.0 # mmHg
+        },
+        bulk={
+            'regions': [
+                {
+                    'type': 'sphere',
+                    'center': (1000.0, 1000.0), # center of the domain
+                    'radius': 250.0, # micrometers
+                    'net_rate': -10.0,
+                    'name': 'tumor_region'
+
+                }
+            ]
+        },
+        dx_ref=10.0,
+        dt_ref=0.0001,
+        description='2D diffusion with decay and a single tumor region uptaking continuously'
+    )
+
+    single_tumor_2d_dt0001 = create_scenario_with_numerical_reference_cached(
+        name='single_tumor_2d_dt0001',
+        schema_class=ADIBCSchema, # reference schema class for golden solution
+        domain_size=(2000.0, 2000.0), # assuming in micrometers for a 2mm x 2mm tissue section
+        grid_points=(100, 100), # dx forced to 20 micrometers, leading to a 100x100 grid
+        dt=0.001, # minutes
         t_final=5, # minutes (64800 minutes = 45 days)
         initial_condition={
             'type': 'uniform',
@@ -341,7 +409,9 @@ def single_tumour():
     runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
     runner.add_schema(CrankNicolsonADIBCSchema, "Crank-Nicolson ADI")
 
-    runner.add_scenario(single_tumor_2d)
+    runner.add_scenario(single_tumor_2d_dt01)
+    runner.add_scenario(single_tumor_2d_dt001)
+    runner.add_scenario(single_tumor_2d_dt0001)
     
     results = runner.run(
         output_dir='benchmark_results/single_tumor',
@@ -432,7 +502,7 @@ def multiple_tumour():
 
 def main():
 
-    results, summary = multiple_tumour()
+    results, summary = single_tumour()
 
 if __name__ == "__main__":
     main()

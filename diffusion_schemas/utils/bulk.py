@@ -431,8 +431,10 @@ class Bulk:
 
     def compute_source(
         self,
+        field: np.ndarray,
         coords: List[np.ndarray],
         dx: Tuple[float, ...],
+        dt: float,
         t: float
     ) -> np.ndarray:
         """
@@ -444,6 +446,8 @@ class Bulk:
         
         Parameters
         ----------
+        field. np.ndarray
+            Current substrate concentration field (used to avoid negative sources).
         coords : List[np.ndarray]
             Coordinate grids (1D arrays for 1D, meshgrids for 2D/3D).
         dx : Tuple[float, ...]
@@ -471,6 +475,12 @@ class Bulk:
             # Take into account proportionality
             source += overlap * rate
 
+        # Negative fields problem (revisit this logic)
+        # If there exists any negative values
+        # AND we are about to remove more substrate than present
+        idx = (source * dt < -field) & (source < 0.0)
+        source[idx] = -field[idx] / dt
+
         # NOTE 
         # Not adding division of rate by grid volume as in Agent implementation
         # Each voxel already receives a fraction of the total rate based on the overlap, so no need to divide by voxel volume here. The net_rate is effectively a per-voxel contribution already after multiplying by the overlap fraction.
@@ -480,3 +490,68 @@ class Bulk:
 
     def __repr__(self) -> str:
         return f"Bulk(n_regions={len(self._regions)})"
+
+class CompleteBulk(Bulk):
+    """
+    Extension of the Bulk class that implements different models for the source term.
+    Allows for complex interactions with the field, such as:
+    1. Linear dependence on the field 
+    2. Target field value
+    """
+    
+    def compute_source(
+        self,
+        field: np.ndarray,
+        coords: List[np.ndarray],
+        dx: Tuple[float, ...],
+        dt: float,
+        t: float
+    ) -> np.ndarray:
+        """
+        Compute the aggregate source term from all regions, with different models.
+        
+        Each region is rasterized onto the grid to produce an overlap
+        mask (values in [0, 1]).  The source contribution of a region is
+        computed based on its net_rate and the current field values, allowing for
+        more complex interactions than a simple constant rate.
+        
+        Parameters
+        ----------
+        field. np.ndarray
+            Current substrate concentration field (used for interaction models).
+        coords : List[np.ndarray]
+            Coordinate grids (1D arrays for 1D, meshgrids for 2D/3D).
+        dx : Tuple[float, ...]
+            Grid spacing in each dimension.
+        dt: float
+            Time step size.
+        t : float
+            Current simulation time.
+            
+        Returns
+        -------
+        np.ndarray
+            Source term array, same shape as the coordinate grids.
+        """
+        # Determine reference shape
+        ref = coords[0]
+        source = np.zeros_like(ref)
+
+        for region in self._regions:
+            rate = region.get_net_rate(t)
+            if rate == 0.0:
+                continue
+            # Retrieve overlap mask
+            overlap = region.domain.rasterize(coords, dx)
+
+            # Example interaction model: linear dependence on the field
+            # This can be replaced with more complex logic as needed
+            source += overlap * rate * field
+
+        # Negative fields problem (revisit this logic)
+        # If there exists any negative values
+        # AND we are about to remove more substrate than present
+        idx = (source * dt < -field) & (source < 0.0)
+        source[idx] = -field[idx] / dt
+
+        return source

@@ -73,10 +73,36 @@ class Agent:
             return self.net_rate(t)
         return self.net_rate
     
+    def _sample_field(
+        self, 
+        field: np.ndarray, 
+        coords: List[np.ndarray]
+    ) -> float:
+        """
+        Sample the substrate density (rho) at the agent's current position.
+        Uses nearest-neighbor interpolation for simplicity.
+        """
+        indices = []
+        for coord_grid, pos in zip(coords, self.position):
+            # Assuming uniform grid, find index of nearest coordinate
+            # Handle both 1D arrays and meshgrids
+            if coord_grid.ndim > 1:
+                # Extract 1D axis from meshgrid
+                grid_1d = np.unique(coord_grid)
+            else:
+                grid_1d = coord_grid
+                
+            idx = (np.abs(grid_1d - pos)).argmin()
+            indices.append(idx)
+            
+        return field[tuple(indices)]
+
     def compute_source(
         self,
+        field: np.ndarray,
         coords: List[np.ndarray],
         dx: Tuple[float, ...],
+        dt: float,
         t: float
     ) -> np.ndarray:
         """
@@ -105,6 +131,12 @@ class Agent:
             else:
                 return np.zeros_like(coords[0])
         
+        # Negative fields problem (revisit this logic)
+        rho_local = self._sample_field(field, coords)
+        if rate < 0 and rate*dt < -rho_local:
+            # If local density is negative (should not happen), return zero source
+            rate = -rho_local / dt
+
         ndim = len(self.position)
         
         if self.kernel_width is None or self.kernel_width < 1e-6:
@@ -287,35 +319,12 @@ class CompleteAgent(Agent):
         # print(f"Agent '{self.name}' at time {t:.3f}: S_k={S}, U_k={U}")
         return S, U
 
-    def _sample_field(
-        self, 
-        field: np.ndarray, 
-        coords: List[np.ndarray]
-    ) -> float:
-        """
-        Sample the substrate density (rho) at the agent's current position.
-        Uses nearest-neighbor interpolation for simplicity.
-        """
-        indices = []
-        for coord_grid, pos in zip(coords, self.position):
-            # Assuming uniform grid, find index of nearest coordinate
-            # Handle both 1D arrays and meshgrids
-            if coord_grid.ndim > 1:
-                # Extract 1D axis from meshgrid
-                grid_1d = np.unique(coord_grid)
-            else:
-                grid_1d = coord_grid
-                
-            idx = (np.abs(grid_1d - pos)).argmin()
-            indices.append(idx)
-            
-        return field[tuple(indices)]
-
     def compute_source(
         self,
         field: np.ndarray,
         coords: List[np.ndarray],
         dx: Tuple[float, ...],
+        dt: float,
         t: float
     ) -> np.ndarray:
         """
@@ -340,20 +349,33 @@ class CompleteAgent(Agent):
         
         # 2. Sample local density (rho) at agent position
         rho_local = self._sample_field(field, coords)
+
+        # Negative fields problem (revisit this logic)
+        # If local density is negative (should not happen)
+        # Agent does not contribute to source term
+        # if rho_local < 0:
+        #     return np.zeros_like(field)
         
         # 3. Calculate Net Rate
         # Term 1: Supply (stops if rho_local = rho_star)
+        # A supply term cannot be negative, as it would be uptaking
         supply_term = max(0.0, S_k * (rho_star - rho_local))
         
         # Term 2: Uptake (proportional to available density)
-        uptake_term = U_k * rho_local
+        # Uptake term contribution to net_rate would be positive if rho_local was negative
+        # A return is made before this happens
+        if rho_local < 0:
+            uptake_term = 0.0
+        else:
+            uptake_term = U_k * rho_local
         
         net_rate = supply_term - uptake_term
-        # print(f"Agent '{self.name}' at time {t:.3f}: rho_local={rho_local:.3e}, supply={supply_term:.3e}, uptake={uptake_term:.3e}, net_rate={net_rate:.3e}")
         
         # If rate is effectively zero, return empty grid
         if abs(net_rate) < 1e-15:
             return np.zeros_like(field)
+        elif net_rate < 0 and net_rate * dt < -rho_local:
+            net_rate = -rho_local / dt
 
         # 4. Distribute this net rate spatially (Point or Gaussian)
         if self.kernel_width is None or self.kernel_width < 1e-6:

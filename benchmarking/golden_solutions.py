@@ -110,7 +110,7 @@ class NumericalReferenceSolution(GoldenSolution):
         for i, ax in enumerate(self.spatial_coords):
             save_dict[f'spatial_axis_{i}'] = np.asarray(ax)
         np.savez_compressed(str(filepath), **save_dict)
-        print(f"  Golden solution saved to {filepath}")
+        print(f"Golden solution saved to {filepath}")
 
     @classmethod
     def load(cls, filepath: str) -> 'NumericalReferenceSolution':
@@ -251,8 +251,8 @@ def create_numerical_reference_cached(
         'dx_ref': dx_ref,
         'dt_ref': dt_ref,
         'domain_size': scenario_params.get('domain_size'),
-        'grid_points': scenario_params.get('grid_points'),
-        'dt': scenario_params.get('dt'),
+        # 'grid_points': scenario_params.get('grid_points'),
+        # 'dt': scenario_params.get('dt'),
         't_final': scenario_params.get('t_final'),
         'diffusion_coefficient': scenario_params.get('diffusion_coefficient'),
         'decay_rate': scenario_params.get('decay_rate'),
@@ -266,7 +266,8 @@ def create_numerical_reference_cached(
     ).hexdigest()[:16]
 
     scenario_name = scenario_params.get('name', 'reference')
-    cache_path = Path(cache_dir) / f"{scenario_name}_{cache_hash}.npz"
+    # cache_path = Path(cache_dir) / f"{scenario_name}_{cache_hash}.npz"
+    cache_path = Path(cache_dir) / f"{cache_hash}.npz"
 
     # Try loading from cache
     if cache_path.exists():

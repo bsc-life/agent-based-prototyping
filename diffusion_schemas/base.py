@@ -373,17 +373,18 @@ class Schema(ABC):
         coords = self._create_coordinate_grids()
         
         for agent in self._agents:
-            if isinstance(agent, CompleteAgent):
-                source += agent.compute_source(self.state, coords, self.dx, self.t)
-            else:
-                source += agent.compute_source(coords, self.dx, self.t)
+            # if isinstance(agent, CompleteAgent):
+            #     source += agent.compute_source(self.state, coords, self.dx, self.t)
+            # else:
+            #     source += agent.compute_source(coords, self.dx, self.t)
+            source += agent.compute_source(self.state, coords, self.dx, self.dt, self.t)
         
         if self._bulk is not None:
             # there is no need to iterate here, as self._bulk is an object itself
             # and self._bulk.compute_source already computes the contribution from the whole bulk region
-            # by iterating internally over its region list
-            # for bulk in self._bulk:
-            source += self._bulk.compute_source(coords, self.dx, self.t)
+            # by iterating internally over its region list (or bulk in self._bulk)
+            # pass the self.state in order to avoid going below 0
+            source += self._bulk.compute_source(self.state, coords, self.dx, self.dt, self.t)
 
         return source
     
