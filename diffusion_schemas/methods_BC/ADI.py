@@ -57,9 +57,9 @@ class ADIBCSchema(Schema):
         Nx, Ny = self.grid_points
         dx, dy = self.dx
         
-        # CHANGE: INSTEAD OF FULL DT, ONLY DT/2
         dt_half = self.dt / 2.0
-        decay_term = (self.decay_rate / 2.0) * self.dt
+        # Each half-step carries half the decay: (λ/2) * (dt/2) = λ·dt/4
+        decay_term = (self.decay_rate / 2.0) * dt_half
         
         # X-Operators
         diag_main_x = -2 * np.ones(Nx) / (dx**2)
@@ -110,10 +110,10 @@ class ADIBCSchema(Schema):
 
         Nx, Ny, Nz = self.grid_points
         dx, dy, dz = self.dx
-        factor = 1 / 3
         
         dt_third = self.dt / 3.0
-        decay_term = (self.decay_rate / 3.0) * self.dt
+        # Each third-step carries a third of the decay: (λ/3) * (dt/3) = λ·dt/9
+        decay_term = (self.decay_rate / 3.0) * dt_third
 
         # X-Operators    
         Lx = diags([np.ones(Nx-1)/dx**2, -2*np.ones(Nx)/dx**2, np.ones(Nx-1)/dx**2], [-1, 0, 1], shape=(Nx, Nx), format='csr')
@@ -142,12 +142,11 @@ class ADIBCSchema(Schema):
 
         if self.ndim == 3: raise NotImplementedError("3D ADI is not implemented yet") # just in case
 
-
         source = self._compute_source_term()
         
         # --------------------- 1D CASE ---------------------
         if self.ndim == 1:
-            rhs = self.state + self.dt * source if source is not None else self.state
+            rhs = self.state + self.dt * source
             Ax = self.system_matrix.copy().tolil()
             rhs = rhs.reshape(self.grid_points[0], 1)
             rhs = self._apply_bc_to_sweep(Ax, rhs, self.dx[0], self.dt)
@@ -157,60 +156,62 @@ class ADIBCSchema(Schema):
         # --------------------- 2D CASE (Peaceman-Rachford) ---------------------
         elif self.ndim == 2:
             dt_half = self.dt / 2.0
+            D = self.diffusion_coefficient
+            dx, dy = self.dx
 
-            # Masking source term at boundaries
-            if source is not None:
-                if isinstance(self._boundary_conditions, DirichletBC):
-                    source[0, :] = 0; source[-1, :] = 0
-                    source[:, 0] = 0; source[:, -1] = 0
-                half_source = dt_half * source
+            # Mask source at Dirichlet boundaries (those nodes are pinned)
+            if isinstance(self._boundary_conditions, DirichletBC):
+                source = source.copy()
+                source[0, :] = 0; source[-1, :] = 0
+                source[:, 0] = 0; source[:, -1] = 0
+            half_source = dt_half * source
 
             LHS_x, RHS_x, LHS_y, RHS_y = self.system_matrix
-            LHS_x_lil = LHS_x.copy().tolil()
-            LHS_y_lil = LHS_y.copy().tolil()
-            
-            # # --- SWEEP 1: Implicit X, Explicit Y ---
-            # # RHS_y evaluates along Y (axis 1). We transpose state, multiply, and transpose back.
-            # rhs_1 = (RHS_y @ self.state.T).T + half_source # add RHS_Y here because it is explicit
-            
-            # # rhs_1 = self._apply_bc_to_sweep(LHS_x_lil, rhs_1, self.dx[0], dt_half)
-            # if isinstance(self._boundary_conditions, DirichletBC):
-            #     val = self._boundary_conditions._get_value(self.t + dt_half)
-            #     rhs_1[0, :] = val; rhs_1[-1, :] = val  # Lock Left/Right
-            #     rhs_1[:, 0] = val; rhs_1[:, -1] = val  # Lock Top/Bottom
-            # elif isinstance(self._boundary_conditions, NeumannBC):
-            #     rhs_1 = self._apply_bc_to_sweep(LHS_x.copy().tolil(), rhs_1, self.dx[0], dt_half)
 
-            # u_star = spsolve(LHS_x_lil.tocsr(), rhs_1)
-            
-            # # --- SWEEP 2: Explicit X, Implicit Y ---
-            # # RHS_x evaluates along X (axis 0).
-            # rhs_2 = (RHS_x @ u_star) + half_source
-            # rhs_2_T = rhs_2.T # Transpose for spsolve (Y is leading)
-
-            # # rhs_2_T = self._apply_bc_to_sweep(LHS_y_lil, rhs_2_T, self.dx[1], dt_half)
-            # if isinstance(self._boundary_conditions, DirichletBC):
-            #     val = self._boundary_conditions._get_value(self.t + self.dt)
-            #     rhs_2_T[0, :] = val; rhs_2_T[-1, :] = val  # Lock Top/Bottom (transposed)
-            #     rhs_2_T[:, 0] = val; rhs_2_T[:, -1] = val  # Lock Left/Right (transposed)
-            # elif isinstance(self._boundary_conditions, NeumannBC):
-            #     rhs_2_T = self._apply_bc_to_sweep(LHS_y.copy().tolil(), rhs_2_T, self.dx[1], dt_half)
-
-            # u_new_T = spsolve(LHS_y_lil.tocsr(), rhs_2_T)
-
-            # self.state = u_new_T.T          
-
-            # Sweep 1
+            # --- SWEEP 1: Implicit X, Explicit Y ---
             rhs_1 = (RHS_y @ self.state.T).T + half_source
-            rhs_1 = self._apply_bc_to_sweep(LHS_x.copy().tolil(), rhs_1, self.dx[0], dt_half)
-            u_star = spsolve(LHS_x, rhs_1)
 
-            # Sweep 2
+            # Add explicit transverse Neumann forcing (y-direction)
+            if isinstance(self._boundary_conditions, NeumannBC):
+                flux = self._boundary_conditions._get_flux(self.t)
+                explicit_y_forcing = dt_half * D * 2 * flux / dy
+                rhs_1[:, 0]  -= explicit_y_forcing
+                rhs_1[:, -1] += explicit_y_forcing
+
+            LHS_x_lil = LHS_x.copy().tolil()
+            rhs_1 = self._apply_bc_to_sweep(LHS_x_lil, rhs_1, dx, dt_half)
+            u_star = spsolve(LHS_x_lil.tocsr(), rhs_1)
+
+            # Enforce all Dirichlet boundaries on intermediate solution
+            if isinstance(self._boundary_conditions, DirichletBC):
+                val = self._boundary_conditions._get_value(self.t + dt_half)
+                u_star[0, :] = val; u_star[-1, :] = val
+                u_star[:, 0] = val; u_star[:, -1] = val
+
+            # --- SWEEP 2: Explicit X, Implicit Y ---
             rhs_2 = (RHS_x @ u_star) + half_source
-            rhs_2_T = self._apply_bc_to_sweep(LHS_y.copy().tolil(), rhs_2.T, self.dx[1], dt_half)
-            u_new_T = spsolve(LHS_y, rhs_2_T)
-            
-            self.state = u_new_T.T
+
+            # Add explicit transverse Neumann forcing (x-direction)
+            if isinstance(self._boundary_conditions, NeumannBC):
+                flux = self._boundary_conditions._get_flux(self.t + dt_half)
+                explicit_x_forcing = dt_half * D * 2 * flux / dx
+                rhs_2[0, :]  -= explicit_x_forcing
+                rhs_2[-1, :] += explicit_x_forcing
+
+            rhs_2_T = rhs_2.T
+            LHS_y_lil = LHS_y.copy().tolil()
+            rhs_2_T = self._apply_bc_to_sweep(LHS_y_lil, rhs_2_T, dy, self.dt)
+            u_new_T = spsolve(LHS_y_lil.tocsr(), rhs_2_T)
+
+            # Enforce all Dirichlet boundaries on final solution
+            if isinstance(self._boundary_conditions, DirichletBC):
+                val = self._boundary_conditions._get_value(self.t + self.dt)
+                u_new = u_new_T.T
+                u_new[0, :] = val; u_new[-1, :] = val
+                u_new[:, 0] = val; u_new[:, -1] = val
+                self.state = u_new
+            else:
+                self.state = u_new_T.T
 
         # --------------------- 3D CASE ---------------------
         elif self.ndim == 3:
@@ -221,8 +222,7 @@ class ADIBCSchema(Schema):
             LHS_y_lil = LHS_y.copy().tolil()
             LHS_z_lil = LHS_z.copy().tolil()
 
-            state_flat = self.state.flatten()
-            third_source = dt_third * source if source is not None else 0.0
+            third_source = dt_third * source
 
             # --- SWEEP 1: Implicit X, Explicit Y & Z ---
             # Apply RHS_y (axis 1) and RHS_z (axis 2)
@@ -278,10 +278,6 @@ class ADIBCSchema(Schema):
             
             matrix[-1, -2] = -2 * alpha
             rhs_array[-1, :] += forcing
-
-            # ADI BC implementation fix
-            # rhs_array[:, 0] = rhs_array[:, 1] - h * flux
-            # rhs_array[:, -1] = rhs_array[:, -2] + h * flux
 
         elif isinstance(self._boundary_conditions, DirichletBC):
             val = self._boundary_conditions._get_value(self.t + dt_sweep)
