@@ -8,7 +8,8 @@ Compares the accuracy and stability of different numerical methods
 import numpy as np
 import matplotlib.pyplot as plt
 import time
-from diffusion_schemas import ExplicitEulerSchema, ImplicitEulerSchema, CrankNicolsonSchema, ADISchema, CrankNicolsonADISchema
+from diffusion_schemas import ExplicitEulerSchema, ImplicitEulerSchema, CrankNicolsonSchema, ImplicitLODSchema, CrankNicolsonLODSchema, \
+ExplicitEulerBCSchema, ImplicitEulerBCSchema, ImplicitLODBCSchema, CrankNicolsonLODBCSchema, CrankNicolsonBCSchema
 from diffusion_schemas.utils import gaussian, NeumannBC
 
 
@@ -36,8 +37,8 @@ def run_comparison():
     dt_explicit = 0.00005  # Small for stability
     dt_implicit = 0.00005    # Can be larger
     dt_crank = 0.00005       # Can be larger
-    dt_adi = 0.00005         # Can be larger
-    dt_crank_adi = 0.00005   # Can be larger
+    dt_lod = 0.00005         # Can be larger
+    dt_crank_lod = 0.00005   # Can be larger
 
     print("=" * 70)
     print("Numerical Methods Comparison")
@@ -127,45 +128,45 @@ def run_comparison():
 
     # ========== Alternate-Direction Implicit (ADI) ==========
     print("\n[4/5] Running Alternate-Direction Implicit (ADI) method...")
-    print(f"  Time step: {dt_adi}")
+    print(f"  Time step: {dt_lod}")
     
-    schema_adi = ADISchema(
+    schema_lod = ImplicitLODSchema(
         domain_size=L,
         grid_points=N,
-        dt=dt_adi,
+        dt=dt_lod,
         diffusion_coefficient=D
     )
-    schema_adi.set_initial_condition(ic)
-    #schema_adi.set_boundary_conditions(bc)
+    schema_lod.set_initial_condition(ic)
+    #schema_lod.set_boundary_conditions(bc)
     
     start = time.time()
-    schema_adi.solve(t_final=t_final)
-    time_adi = time.time() - start
-    u_adi = schema_adi.get_state()
-    steps_adi = int(t_final / dt_adi)
+    schema_lod.solve(t_final=t_final)
+    time_lod = time.time() - start
+    u_lod = schema_lod.get_state()
+    steps_lod = int(t_final / dt_lod)
     
-    print(f"  Completed in {time_adi:.4f} seconds ({steps_adi} steps)")
+    print(f"  Completed in {time_lod:.4f} seconds ({steps_lod} steps)")
     
-    # ========== Crank-Nicolson with ADI ==========
-    print("\n[5/5] Running Crank-Nicolson with ADI method...")
-    print(f"  Time step: {dt_crank_adi}")
+    # ========== Crank-Nicolson with LOD ==========
+    print("\n[5/5] Running Crank-Nicolson with LOD method...")
+    print(f"  Time step: {dt_crank_lod}")
     
-    schema_crank_adi = CrankNicolsonADISchema(
+    schema_crank_lod = CrankNicolsonLODSchema(
         domain_size=L,
         grid_points=N,
-        dt=dt_crank_adi,
+        dt=dt_crank_lod,
         diffusion_coefficient=D
     )
-    schema_crank_adi.set_initial_condition(ic)
-    # schema_crank_adi.set_boundary_conditions(bc)
+    schema_crank_lod.set_initial_condition(ic)
+    # schema_crank_lod.set_boundary_conditions(bc)
     
     start = time.time()
-    schema_crank_adi.solve(t_final=t_final)
-    time_crank_adi = time.time() - start
-    u_crank_adi = schema_crank_adi.get_state()
-    steps_crank_adi = int(t_final / dt_crank_adi)
+    schema_crank_lod.solve(t_final=t_final)
+    time_crank_lod = time.time() - start
+    u_crank_lod = schema_crank_lod.get_state()
+    steps_crank_lod = int(t_final / dt_crank_lod)
     
-    print(f"  Completed in {time_crank_adi:.4f} seconds ({steps_crank_adi} steps)")
+    print(f"  Completed in {time_crank_lod:.4f} seconds ({steps_crank_lod} steps)")
     
     # Analytical solution (approximation)
     u_analytical = analytical_solution_2d(X, Y, x0, y0, t_final, D)
@@ -174,8 +175,8 @@ def run_comparison():
     error_explicit = np.linalg.norm(u_explicit - u_analytical) / np.linalg.norm(u_analytical)
     error_implicit = np.linalg.norm(u_implicit - u_analytical) / np.linalg.norm(u_analytical)
     error_crank = np.linalg.norm(u_crank - u_analytical) / np.linalg.norm(u_analytical)
-    error_adi = np.linalg.norm(u_adi - u_analytical) / np.linalg.norm(u_analytical)
-    error_crank_adi = np.linalg.norm(u_crank_adi - u_analytical) / np.linalg.norm(u_analytical)
+    error_lod = np.linalg.norm(u_lod - u_analytical) / np.linalg.norm(u_analytical)
+    error_crank_lod = np.linalg.norm(u_crank_lod - u_analytical) / np.linalg.norm(u_analytical)
     
     # Print summary
     print("\n" + "=" * 70)
@@ -186,8 +187,8 @@ def run_comparison():
     print(f"{'Explicit Euler':<25} {dt_explicit:<12.6f} {steps_explicit:<8} {time_explicit:<12.4f} {error_explicit:<12.6e}")
     print(f"{'Implicit Euler':<25} {dt_implicit:<12.6f} {steps_implicit:<8} {time_implicit:<12.4f} {error_implicit:<12.6e}")
     print(f"{'Crank-Nicolson':<25} {dt_crank:<12.6f} {steps_crank:<8} {time_crank:<12.4f} {error_crank:<12.6e}")
-    print(f"{'ADI':<25} {dt_adi:<12.6f} {steps_adi:<8} {time_adi:<12.4f} {error_adi:<12.6e}")
-    print(f"{'Crank-Nicolson ADI':<25} {dt_crank_adi:<12.6f} {steps_crank_adi:<8} {time_crank_adi:<12.4f} {error_crank_adi:<12.6e}")
+    print(f"{'Implicit LOD':<25} {dt_lod:<12.6f} {steps_lod:<8} {time_lod:<12.4f} {error_lod:<12.6e}")
+    print(f"{'Crank-Nicolson LOD':<25} {dt_crank_lod:<12.6f} {steps_crank_lod:<8} {time_crank_lod:<12.4f} {error_crank_lod:<12.6e}")
     print("=" * 70)
     
     # Plot comparison
@@ -201,8 +202,8 @@ def run_comparison():
     ax.plot(x, u_explicit[:, mid_y], 'b-', linewidth=1.5, label='Explicit')
     ax.plot(x, u_implicit[:, mid_y], 'r-', linewidth=1.5, label='Implicit')
     ax.plot(x, u_crank[:, mid_y], 'g-', linewidth=1.5, label='Crank-Nicolson')
-    ax.plot(x, u_adi[:, mid_y], 'm-', linewidth=1.5, label='ADI')
-    ax.plot(x, u_crank_adi[:, mid_y], 'c-', linewidth=1.5, label='Crank-Nicolson ADI')
+    ax.plot(x, u_lod[:, mid_y], 'm-', linewidth=1.5, label='Implicit LOD')
+    ax.plot(x, u_crank_lod[:, mid_y], 'c-', linewidth=1.5, label='Crank-Nicolson LOD')
     ax.set_xlabel('Position x')
     ax.set_ylabel('Concentration u (y=0.5)')
     ax.set_title(f'Solution Comparison at t={t_final}')
@@ -214,8 +215,8 @@ def run_comparison():
     ax.plot(x, abs(u_explicit[:, mid_y] - u_analytical[:, mid_y]), 'b-', label='Explicit')
     ax.plot(x, abs(u_implicit[:, mid_y] - u_analytical[:, mid_y]), 'r-', label='Implicit')
     ax.plot(x, abs(u_crank[:, mid_y] - u_analytical[:, mid_y]), 'g-', label='Crank-Nicolson')
-    ax.plot(x, abs(u_adi[:, mid_y] - u_analytical[:, mid_y]), 'm-', label='ADI')
-    ax.plot(x, abs(u_crank_adi[:, mid_y] - u_analytical[:, mid_y]), 'c-', label='Crank-Nicolson ADI')
+    ax.plot(x, abs(u_lod[:, mid_y] - u_analytical[:, mid_y]), 'm-', label='Implicit LOD')
+    ax.plot(x, abs(u_crank_lod[:, mid_y] - u_analytical[:, mid_y]), 'c-', label='Crank-Nicolson LOD')
     ax.axhline(y=0, color='k', linestyle='--', alpha=0.5)
     ax.set_xlabel('Position x')
     ax.set_ylabel('Asbolute Error (y=0.5)')
@@ -225,8 +226,8 @@ def run_comparison():
     
     # Plot 3: Performance comparison
     ax = axes[1, 0]
-    methods = ['Explicit\nEuler', 'Implicit\nEuler', 'Crank-\nNicolson', 'ADI', 'CN-ADI']
-    times = [time_explicit, time_implicit, time_crank, time_adi, time_crank_adi]
+    methods = ['Explicit\nEuler', 'Implicit\nEuler', 'Crank-\nNicolson', 'Implicit LOD', 'CN-LOD']
+    times = [time_explicit, time_implicit, time_crank, time_lod, time_crank_lod]
     colors = ['blue', 'red', 'green', 'magenta', 'cyan']
     bars = ax.bar(methods, times, color=colors, alpha=0.7)
     ax.set_ylabel('Computation Time (s)')
@@ -241,7 +242,7 @@ def run_comparison():
     
     # Plot 4: Accuracy comparison
     ax = axes[1, 1]
-    errors = [error_explicit, error_implicit, error_crank, error_adi, error_crank_adi]
+    errors = [error_explicit, error_implicit, error_crank, error_lod, error_crank_lod]
     bars = ax.bar(methods, errors, color=colors, alpha=0.7)
     ax.set_ylabel('Relative Error')
     ax.set_yscale('log')
@@ -264,7 +265,7 @@ def run_comparison():
     print("  • Explicit Euler requires small time steps for stability")
     print("  • Implicit methods allow larger time steps but solve linear systems")
     print("  • Crank-Nicolson achieves best accuracy (2nd order in time)")
-    print("  • ADI and CN-ADI are faster for multi-dimensional problems")
+    print("  • LOD and CN-LOD are faster for multi-dimensional problems")
     print("  • Trade-off between step size, stability, and computational cost") 
     """
 

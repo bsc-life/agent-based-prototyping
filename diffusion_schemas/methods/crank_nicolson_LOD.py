@@ -12,7 +12,7 @@ from scipy.sparse.linalg import spsolve
 from diffusion_schemas.base import Schema
 
 
-class CrankNicolsonADISchema(Schema):
+class CrankNicolsonLODSchema(Schema):
     """
     Crank-Nicolson method for the diffusion equation.
     
@@ -106,7 +106,7 @@ class CrankNicolsonADISchema(Schema):
         """Build the 2D system matrices using Kronecker products."""
         Nx, Ny = self.grid_points
         dx, dy = self.dx
-        factor = 1 / 2 # ADI factor for 2D splitting
+        factor = 1 / 2 # LOD factor for 2D splitting
         
         # 1D Laplacian operators
         diag_main_x = -2 * np.ones(Nx) / (dx**2)
@@ -144,7 +144,7 @@ class CrankNicolsonADISchema(Schema):
         """Build the 3D system matrices using Kronecker products."""
         Nx, Ny, Nz = self.grid_points
         dx, dy, dz = self.dx
-        factor = 1 / 3 # ADI factor for 3D splitting
+        factor = 1 / 3 # LOD factor for 3D splitting
         
         # 1D Laplacian operators
         diag_main_x = -2 * np.ones(Nx) / (dx**2)
@@ -205,14 +205,14 @@ class CrankNicolsonADISchema(Schema):
         #       self.dt * (1 - self.theta) * source_n.flatten()
         rhs_grid = self.state + explicit_term + self.dt * source_np1
 
-        # These two lines make CN and CN-ADI differ!!!
+        # These two lines make CN and CN-LOD differ!!!
         # Should BC be implemented only at the end of the total step or after each step (implicit and explicit)???
         # if self._boundary_conditions is not None:
         #     rhs_grid = self._apply_boundary_conditions(rhs_grid)
 
         # Solve the linear system: A_impl * u^(n+1) = rhs
-        # ADI step to solve the system more efficiently (split into x,y,z)
-        u_new_grid = self.step_adi(rhs_grid) 
+        # LOD step to solve the system more efficiently (split into x,y,z)
+        u_new_grid = self.step_lod(rhs_grid) 
         
         # Reshape to grid
         self.state = u_new_grid
@@ -254,10 +254,10 @@ class CrankNicolsonADISchema(Schema):
 
         return explicit_term
 
-    def step_adi(self, rhs):
+    def step_lod(self, rhs):
 
         # Theta proportion is already accounted for in the system matrices
-        # We just solve the linear system using ADI splitting.
+        # We just solve the linear system using LOD splitting.
 
         if self.ndim == 1:
             self.state = spsolve(self.A_impl_x, rhs)
@@ -306,7 +306,7 @@ class CrankNicolsonADISchema(Schema):
             # Reshape back to 3D and transpose back to original shape
             self.state = self.state.reshape(Nz, Nx, Ny).transpose(1,2,0)
 
-        # Fix return type in step_adi
+        # Fix return type in step_lod
         return self.state  # Removed flatten to maintain grid shape
     
     def set_diffusion_coefficient(self, value: float) -> None:

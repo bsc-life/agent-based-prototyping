@@ -3,13 +3,15 @@
 from diffusion_schemas.methods_BC.explicit_euler import ExplicitEulerBCSchema
 from diffusion_schemas.methods_BC.implicit import ImplicitEulerBCSchema
 from diffusion_schemas.methods_BC.crank_nicolson import CrankNicolsonBCSchema
-from diffusion_schemas.methods_BC.implicit_ADI import ADIBCSchema
-from diffusion_schemas.methods_BC.crank_nicolson_ADI import CrankNicolsonADIBCSchema
+from diffusion_schemas.methods_BC.implicit_LOD import ImplicitLODBCSchema
+from diffusion_schemas.methods_BC.crank_nicolson_LOD import CrankNicolsonLODBCSchema
 
 __all__ = [
     "ExplicitEulerBCSchema",
     "ImplicitEulerBCSchema",
     "CrankNicolsonBCSchema",
-    "ADIBCSchema",
-    "CrankNicolsonADIBCSchema",
+    "ImplicitLODBCSchema",
+    "CrankNicolsonLODBCSchema",
+    "ADIBCSchema"
 ]
+

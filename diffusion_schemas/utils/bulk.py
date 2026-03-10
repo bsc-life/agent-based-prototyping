@@ -357,6 +357,32 @@ class Region:
     def __repr__(self) -> str:
         rate = self.net_rate if not callable(self.net_rate) else "f(t)"
         return f"Region(name='{self.name}', domain={self.domain}, net_rate={rate})"
+    
+class LinearRegion(Region):
+    def __init__(self, domain: RegionDomain, linear_rate: float, name: str = ""):
+        super().__init__(domain, net_rate=0.0, name=name)
+        self.linear_rate = linear_rate
+
+    def set_linear_rate(self, rate: float) -> None:
+        self.linear_rate = rate 
+
+    def get_linear_rate(self, t: float) -> float:
+        if callable(self.linear_rate):
+            return self.linear_rate(t)
+        return self.linear_rate
+
+class TargetRegion(LinearRegion):
+    def __init__(self, domain: RegionDomain, linear_rate: float, rho_target: float, name: str = ""):
+        super().__init__(domain, linear_rate=linear_rate, name=name)
+        self.rho_target = rho_target
+
+    def set_rho_target(self, target: float) -> None:
+        self.rho_target = target 
+
+    def get_rho_target(self, t: float) -> float:
+        if callable(self.rho_target):
+            return self.rho_target(t)
+        return self.rho_target
 
 class Bulk:
     """
@@ -465,15 +491,32 @@ class Bulk:
         source = np.zeros_like(ref)
 
         for region in self._regions:
-            rate = region.get_net_rate(t)
-            if rate == 0.0:
-                continue
-            # Retrieve overlap mask
-            # 1 = voxel completely inside region
-            # 0 = voxel completely outside region
-            overlap = region.domain.rasterize(coords, dx)
-            # Take into account proportionality
-            source += overlap * rate
+
+            if isinstance(region, LinearRegion):
+                rate = region.get_linear_rate(t)
+                if rate == 0.0:
+                    continue
+                overlap = region.domain.rasterize(coords, dx)
+                source += overlap * rate * field
+
+            elif isinstance(region, TargetRegion):
+                rate = region.get_linear_rate(t)
+                rho_target = region.get_rho_target(t)
+                if rate == 0.0:
+                    continue
+                overlap = region.domain.rasterize(coords, dx)
+                source += overlap * rate * (rho_target - field)
+
+            else: # normal Region with fixed net_rate
+                rate = region.get_net_rate(t)
+                if rate == 0.0:
+                    continue
+                # Retrieve overlap mask
+                # 1 = voxel completely inside region
+                # 0 = voxel completely outside region
+                # Take into account proportionality
+                overlap = region.domain.rasterize(coords, dx)
+                source += overlap * rate
 
         # Negative fields problem (revisit this logic)
         # If there exists any negative values
@@ -491,67 +534,3 @@ class Bulk:
     def __repr__(self) -> str:
         return f"Bulk(n_regions={len(self._regions)})"
 
-class CompleteBulk(Bulk):
-    """
-    Extension of the Bulk class that implements different models for the source term.
-    Allows for complex interactions with the field, such as:
-    1. Linear dependence on the field 
-    2. Target field value
-    """
-    
-    def compute_source(
-        self,
-        field: np.ndarray,
-        coords: List[np.ndarray],
-        dx: Tuple[float, ...],
-        dt: float,
-        t: float
-    ) -> np.ndarray:
-        """
-        Compute the aggregate source term from all regions, with different models.
-        
-        Each region is rasterized onto the grid to produce an overlap
-        mask (values in [0, 1]).  The source contribution of a region is
-        computed based on its net_rate and the current field values, allowing for
-        more complex interactions than a simple constant rate.
-        
-        Parameters
-        ----------
-        field. np.ndarray
-            Current substrate concentration field (used for interaction models).
-        coords : List[np.ndarray]
-            Coordinate grids (1D arrays for 1D, meshgrids for 2D/3D).
-        dx : Tuple[float, ...]
-            Grid spacing in each dimension.
-        dt: float
-            Time step size.
-        t : float
-            Current simulation time.
-            
-        Returns
-        -------
-        np.ndarray
-            Source term array, same shape as the coordinate grids.
-        """
-        # Determine reference shape
-        ref = coords[0]
-        source = np.zeros_like(ref)
-
-        for region in self._regions:
-            rate = region.get_net_rate(t)
-            if rate == 0.0:
-                continue
-            # Retrieve overlap mask
-            overlap = region.domain.rasterize(coords, dx)
-
-            # Example interaction model: linear dependence on the field
-            # This can be replaced with more complex logic as needed
-            source += overlap * rate * field
-
-        # Negative fields problem (revisit this logic)
-        # If there exists any negative values
-        # AND we are about to remove more substrate than present
-        idx = (source * dt < -field) & (source < 0.0)
-        source[idx] = -field[idx] / dt
-
-        return source

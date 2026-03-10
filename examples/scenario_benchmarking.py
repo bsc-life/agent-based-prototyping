@@ -1,6 +1,9 @@
+from unittest import runner
+
 import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
+import copy
 
 # New framework imports - cleaner with __init__.py!
 from benchmarking import (
@@ -12,15 +15,16 @@ from benchmarking import (
     create_scenario,
     GaussianDiffusion2D,
     FlexibleSimulation,
-    ValidationScenario
+    ValidationScenario,
+    plot_scenario
 )
 
 # Schema imports
 from diffusion_schemas import (
     ExplicitEulerSchema, ImplicitEulerSchema, CrankNicolsonSchema,
-    ADISchema, CrankNicolsonADISchema,
+    ImplicitLODSchema, CrankNicolsonLODSchema,
     ExplicitEulerBCSchema, ImplicitEulerBCSchema, CrankNicolsonBCSchema,
-    ADIBCSchema, CrankNicolsonADIBCSchema
+    ImplicitLODBCSchema, CrankNicolsonLODBCSchema, ADIBCSchema
 )
 
 # Utilities for backward compatibility example
@@ -41,9 +45,9 @@ def gaussian_pulses():
 
     runner.add_schema(ExplicitEulerBCSchema, "Explicit Euler")
     runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
-    runner.add_schema(ADIBCSchema, "ADI")
+    runner.add_schema(ImplicitLODBCSchema, "Implicit LOD")
     runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
-    runner.add_schema(CrankNicolsonADIBCSchema, "Crank-Nicolson ADI")
+    runner.add_schema(CrankNicolsonLODBCSchema, "Crank-Nicolson LOD")
 
     runner.add_scenario(gaussian_pulse_1d)
     runner.add_scenario(gaussian_pulse_2d)
@@ -74,9 +78,9 @@ def step_functions():
 
     runner.add_schema(ExplicitEulerBCSchema, "Explicit Euler")
     runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
-    runner.add_schema(ADIBCSchema, "ADI")
+    runner.add_schema(ImplicitLODBCSchema, "Implicit LOD")
     runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
-    runner.add_schema(CrankNicolsonADIBCSchema, "Crank-Nicolson ADI")
+    runner.add_schema(CrankNicolsonLODBCSchema, "Crank-Nicolson LOD")
 
     runner.add_scenario(step_function_1d)
     runner.add_scenario(step_function_2d)
@@ -106,9 +110,9 @@ def steady_state_agents():
 
     runner.add_schema(ExplicitEulerSchema, "Explicit Euler")
     runner.add_schema(ImplicitEulerSchema, "Implicit Euler")
-    runner.add_schema(ADISchema, "ADI")
+    runner.add_schema(ImplicitLODSchema, "Implicit LOD")
     runner.add_schema(CrankNicolsonSchema, "Crank-Nicolson")
-    runner.add_schema(CrankNicolsonADISchema, "Crank-Nicolson ADI")
+    runner.add_schema(CrankNicolsonLODSchema, "Crank-Nicolson LOD")
 
     runner.add_scenario(steady_state_agent_1d)
     runner.add_scenario(steady_state_agent_2d)
@@ -138,9 +142,9 @@ def exponential_decay():
 
     runner.add_schema(ExplicitEulerSchema, "Explicit Euler")
     runner.add_schema(ImplicitEulerSchema, "Implicit Euler")
-    runner.add_schema(ADISchema, "ADI")
+    runner.add_schema(ImplicitLODSchema, "Implicit LOD")
     runner.add_schema(CrankNicolsonSchema, "Crank-Nicolson")
-    runner.add_schema(CrankNicolsonADISchema, "Crank-Nicolson ADI")
+    runner.add_schema(CrankNicolsonLODSchema, "Crank-Nicolson LOD")
 
     runner.add_scenario(exponential_decay_1d)
     
@@ -168,9 +172,9 @@ def sine_decay():
 
     runner.add_schema(ExplicitEulerBCSchema, "Explicit Euler")
     runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
-    runner.add_schema(ADIBCSchema, "ADI")
+    runner.add_schema(ImplicitLODBCSchema, "Implicit LOD")
     runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
-    runner.add_schema(CrankNicolsonADIBCSchema, "Crank-Nicolson ADI")
+    runner.add_schema(CrankNicolsonLODBCSchema, "Crank-Nicolson LOD")
 
     runner.add_scenario(sine_decay_1d)
     
@@ -192,26 +196,44 @@ def cosine_diffusion():
     print("Convergence Test 1 from BioFVM Benchmarking")
     print("=" * 70)
 
-    convergence_test_1 = get_scenario_by_name('cosine_diffusion_1d')  
+    convergence_test_0 = copy.deepcopy(get_scenario_by_name('cosine_diffusion_2d'))  
+    convergence_test_0["dt"] = 0.00001
+    convergence_test_0["name"] = "cosine_diffusion_2d_dt000001"
+    convergence_test_1 = copy.deepcopy(get_scenario_by_name('cosine_diffusion_2d'))  
+    convergence_test_1["dt"] = 0.0001
+    convergence_test_1["name"] = "cosine_diffusion_2d_dt00001"
+    convergence_test_2 = copy.deepcopy(get_scenario_by_name('cosine_diffusion_2d'))
+    convergence_test_2["dt"] = 0.001
+    convergence_test_2["name"] = "cosine_diffusion_2d_dt0001"
+    convergence_test_3 = copy.deepcopy(get_scenario_by_name('cosine_diffusion_2d'))
+    convergence_test_3["dt"] = 0.01
+    convergence_test_3["name"] = "cosine_diffusion_2d_dt001"
+    convergence_test_4 = copy.deepcopy(get_scenario_by_name('cosine_diffusion_2d'))
+    convergence_test_4["dt"] = 0.1
+    convergence_test_4["name"] = "cosine_diffusion_2d_dt01"
 
     runner = BenchmarkRunner()
 
-    runner.add_schema(ExplicitEulerBCSchema, "Explicit Euler")
-    runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
-    runner.add_schema(ADIBCSchema, "ADI")
-    runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
-    runner.add_schema(CrankNicolsonADIBCSchema, "Crank-Nicolson ADI")
+    # runner.add_schema(ExplicitEulerSchema, "Explicit Euler")
+    # runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
+    runner.add_schema(ImplicitLODBCSchema, "Implicit LOD")
+    # runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
+    runner.add_schema(CrankNicolsonLODBCSchema, "Crank-Nicolson LOD")
 
+    runner.add_scenario(convergence_test_0)
     runner.add_scenario(convergence_test_1)
+    # runner.add_scenario(convergence_test_2)
+    # runner.add_scenario(convergence_test_3)
+    # runner.add_scenario(convergence_test_4)
     
     results = runner.run(
-        output_dir='benchmark_results/convergence_test_1_bc',
-        store_history=True,
+        output_dir='benchmark_results/cosine_diffusion_bc',
+        store_history=False,
         generate_plots=True
     )
     
     summary = runner.generate_summary_report(
-        output_path='benchmark_results/convergence_test_1_bc/summary.csv'
+        output_path='benchmark_results/cosine_diffusion_bc/summary_2d_2.csv'
     )
 
     return results, summary
@@ -223,7 +245,7 @@ def custom_scenario():
     scenario = create_scenario_with_numerical_reference(
         name='Random Scenario',
         # Schema to take as numerical reference
-        schema_class=ADIBCSchema, 
+        schema_class=ImplicitLODBCSchema, 
         dx_ref=0.001,
         dt_ref=0.001,
         # Simulation parameters
@@ -242,18 +264,18 @@ def custom_scenario():
         # Agent addition (could be None)
         # List of dictionaries indicating agent parameters
         agents = [
-            {
-                'position': [0.35,0.8],
-                'secretion_rate': 0.0,
-                'uptake_rate': 1.0,
-                'saturation_density': 0.98,
-                'kernel_width': 0.05
-            },
-            {
-                'position': [0.25,0.25],
-                'net_rate': 3,
-                'kernel_width': 0.1
-            }
+            # {
+            #     'position': [0.35,0.8],
+            #     'secretion_rate': 0.0,
+            #     'uptake_rate': 1.0,
+            #     'saturation_density': 0.98,
+            #     'kernel_width': 0.05
+            # },
+            # {
+            #     'position': [0.25,0.25],
+            #     'net_rate': 3,
+            #     'kernel_width': 0.1
+            # }
             ],
         # Bulk region addition (could be None)
         # List of dictionaries indicating bulk region parameters
@@ -264,6 +286,19 @@ def custom_scenario():
                     'center': (0.8,0.8),
                     'radius': 0.15,
                     'net_rate': -5
+                },
+                {
+                    'type': 'rectangle',
+                    'origin': (0.2, 0.3),
+                    'size': (0.1, 0.5),
+                    'linear_rate': 10
+                },
+                {
+                    'type': 'sphere',
+                    'center': (0.6,0.3),
+                    'radius': 0.15,
+                    'linear_rate': -100,
+                    'rho_target': 0.5
                 }
             ]
         }
@@ -271,11 +306,11 @@ def custom_scenario():
 
     runner = BenchmarkRunner()
 
-    runner.add_schema(ADIBCSchema, "ADI")
+    runner.add_schema(ImplicitLODBCSchema, "Implicit LOD")
     runner.add_schema(ExplicitEulerBCSchema, "Explicit Euler")
     runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
     runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
-    runner.add_schema(CrankNicolsonADIBCSchema, "Crank-Nicolson ADI")
+    runner.add_schema(CrankNicolsonLODBCSchema, "Crank-Nicolson LOD")
 
 
     runner.add_scenario(scenario=scenario)
@@ -298,129 +333,94 @@ def single_tumour():
     print("Single Tumor 2D Benchmarking")
     print("=" * 70)
 
-    # single_tumor_2d = get_scenario_by_name('single_tumor_2d')  
-    single_tumor_2d_dt01 = create_scenario_with_numerical_reference_cached(
-        name='single_tumor_2d_dt01',
-        schema_class=ADIBCSchema, # reference schema class for golden solution
-        domain_size=(2000.0, 2000.0), # assuming in micrometers for a 2mm x 2mm tissue section
-        grid_points=(100, 100), # dx forced to 20 micrometers, leading to a 100x100 grid
-        dt=0.1, # minutes
-        t_final=5, # minutes (64800 minutes = 45 days)
-        initial_condition={
-            'type': 'uniform',
-            'value': 38.0 # mmHg
-        },
-        diffusion_coefficient=float(1e5), # μm^2/min
-        decay_rate=0.1, # per minute
-        boundary_condition={
-            'type': 'dirichlet',
-            'value': 38.0 # mmHg
-        },
-        bulk={
-            'regions': [
-                {
-                    'type': 'sphere',
-                    'center': (1000.0, 1000.0), # center of the domain
-                    'radius': 250.0, # micrometers
-                    'net_rate': -10.0,
-                    'name': 'tumor_region'
+    base_scenario = get_scenario_by_name('single_tumor_2d')
+    store = True
+    base_scenario["golden_solution"]["dt_ref"] = 0.01
+    base_scenario["store_history"] = store
 
-                }
-            ]
-        },
-        dx_ref=10.0,
-        dt_ref=0.0001,
-        description='2D diffusion with decay and a single tumor region uptaking continuously'
-    )
+    # dt = 0.5
+    single_tumor_2d_dt05 = copy.deepcopy(base_scenario)
+    single_tumor_2d_dt05["dt"] = 0.5
+    single_tumor_2d_dt05["t_final"] = 10
+    single_tumor_2d_dt05["name"] = "single_tumor_2d_dt05"
 
-    single_tumor_2d_dt001 = create_scenario_with_numerical_reference_cached(
-        name='single_tumor_2d_dt001',
-        schema_class=ADIBCSchema, # reference schema class for golden solution
-        domain_size=(2000.0, 2000.0), # assuming in micrometers for a 2mm x 2mm tissue section
-        grid_points=(100, 100), # dx forced to 20 micrometers, leading to a 100x100 grid
-        dt=0.01, # minutes
-        t_final=5, # minutes (64800 minutes = 45 days)
-        initial_condition={
-            'type': 'uniform',
-            'value': 38.0 # mmHg
-        },
-        diffusion_coefficient=float(1e5), # μm^2/min
-        decay_rate=0.1, # per minute
-        boundary_condition={
-            'type': 'dirichlet',
-            'value': 38.0 # mmHg
-        },
-        bulk={
-            'regions': [
-                {
-                    'type': 'sphere',
-                    'center': (1000.0, 1000.0), # center of the domain
-                    'radius': 250.0, # micrometers
-                    'net_rate': -10.0,
-                    'name': 'tumor_region'
+    # dt = 0.4
+    single_tumor_2d_dt04 = copy.deepcopy(base_scenario)
+    single_tumor_2d_dt04["dt"] = 0.4
+    single_tumor_2d_dt04["t_final"] = 10
+    single_tumor_2d_dt04["name"] = "single_tumor_2d_dt04"
 
-                }
-            ]
-        },
-        dx_ref=10.0,
-        dt_ref=0.0001,
-        description='2D diffusion with decay and a single tumor region uptaking continuously'
-    )
+    # dt = 0.3
+    single_tumor_2d_dt03 = copy.deepcopy(base_scenario)
+    single_tumor_2d_dt03["dt"] = 0.3
+    single_tumor_2d_dt03["t_final"] = 10
+    single_tumor_2d_dt03["name"] = "single_tumor_2d_dt03"
 
-    single_tumor_2d_dt0001 = create_scenario_with_numerical_reference_cached(
-        name='single_tumor_2d_dt0001',
-        schema_class=ADIBCSchema, # reference schema class for golden solution
-        domain_size=(2000.0, 2000.0), # assuming in micrometers for a 2mm x 2mm tissue section
-        grid_points=(100, 100), # dx forced to 20 micrometers, leading to a 100x100 grid
-        dt=0.001, # minutes
-        t_final=5, # minutes (64800 minutes = 45 days)
-        initial_condition={
-            'type': 'uniform',
-            'value': 38.0 # mmHg
-        },
-        diffusion_coefficient=float(1e5), # μm^2/min
-        decay_rate=0.1, # per minute
-        boundary_condition={
-            'type': 'dirichlet',
-            'value': 38.0 # mmHg
-        },
-        bulk={
-            'regions': [
-                {
-                    'type': 'sphere',
-                    'center': (1000.0, 1000.0), # center of the domain
-                    'radius': 250.0, # micrometers
-                    'net_rate': -10.0,
-                    'name': 'tumor_region'
+    # dt = 0.2
+    single_tumor_2d_dt02 = copy.deepcopy(base_scenario)
+    single_tumor_2d_dt02["dt"] = 0.2
+    single_tumor_2d_dt02["t_final"] = 10
+    single_tumor_2d_dt02["name"] = "single_tumor_2d_dt02"
 
-                }
-            ]
-        },
-        dx_ref=10.0,
-        dt_ref=0.0001,
-        description='2D diffusion with decay and a single tumor region uptaking continuously'
-    )
+    # dt = 0.1
+    single_tumor_2d_dt01 = copy.deepcopy(base_scenario)
+    single_tumor_2d_dt01["dt"] = 0.1
+    single_tumor_2d_dt01["t_final"] = 10
+    single_tumor_2d_dt01["name"] = "single_tumor_2d_dt01"
+
+    # dt = 0.05
+    single_tumor_2d_dt005 = copy.deepcopy(base_scenario)
+    single_tumor_2d_dt005["dt"] = 0.05
+    single_tumor_2d_dt005["t_final"] = 10
+    single_tumor_2d_dt005["name"] = "single_tumor_2d_dt005"
+
+    # dt = 0.01
+    single_tumor_2d_dt001 = copy.deepcopy(base_scenario)
+    single_tumor_2d_dt001["dt"] = 0.01
+    single_tumor_2d_dt001["t_final"] = 10
+    single_tumor_2d_dt001["name"] = "single_tumor_2d_dt001"
+
+    # # dt = 0.005
+    # single_tumor_2d_dt0005 = copy.deepcopy(base_scenario)
+    # single_tumor_2d_dt0005["dt"] = 0.005
+    # single_tumor_2d_dt0005["t_final"] = 10
+    # single_tumor_2d_dt0005["name"] = "single_tumor_2d_dt0005"
+    # single_tumor_2d_dt05["golden_solution"]["dt_ref"] = 0.01
+
+    # # dt = 0.001
+    # single_tumor_2d_dt0001 = copy.deepcopy(base_scenario)
+    # single_tumor_2d_dt0001["dt"] = 0.001
+    # single_tumor_2d_dt0001["t_final"] = 10
+    # single_tumor_2d_dt0001["name"] = "single_tumor_2d_dt0001"
+    # single_tumor_2d_dt05["golden_solution"]["dt_ref"] = 0.01
 
     runner = BenchmarkRunner()
 
     # runner.add_schema(ExplicitEulerBCSchema, "Explicit Euler")
-    runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
+    # runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
+    # runner.add_schema(ImplicitLODBCSchema, "Implicit LOD")
+    # runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
+    # runner.add_schema(CrankNicolsonLODBCSchema, "Crank-Nicolson LOD")
     runner.add_schema(ADIBCSchema, "ADI")
-    runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
-    runner.add_schema(CrankNicolsonADIBCSchema, "Crank-Nicolson ADI")
 
     runner.add_scenario(single_tumor_2d_dt01)
     runner.add_scenario(single_tumor_2d_dt001)
-    runner.add_scenario(single_tumor_2d_dt0001)
+    # runner.add_scenario(single_tumor_2d_dt0001)
+    runner.add_scenario(single_tumor_2d_dt05)
+    runner.add_scenario(single_tumor_2d_dt005)
+    # runner.add_scenario(single_tumor_2d_dt0005)
+    runner.add_scenario(single_tumor_2d_dt02)
+    runner.add_scenario(single_tumor_2d_dt03)
+    runner.add_scenario(single_tumor_2d_dt04)
     
     results = runner.run(
         output_dir='benchmark_results/single_tumor',
-        store_history=True,
+        store_history=store,
         generate_plots=True
     )
     
     summary = runner.generate_summary_report(
-        output_path='benchmark_results/single_tumor/summary.csv'
+        output_path='benchmark_results/single_tumor/summary_ADI.csv'
     )
     
     return results, summary
@@ -435,69 +435,140 @@ def multiple_tumour():
     # Positions will be set randomly within the domain, 
     # ensuring they do not overlap and are fully contained
 
-    np.random.seed(20)  # for reproducibility
-    tumours = []
-    n = 30
-    radius = 10.0
-    for i in range(n):
-        while True:
-            center = (np.random.uniform(250, 1750), np.random.uniform(250, 1750))
-            # Check for overlap with existing tumors
-            if all(np.linalg.norm(np.array(center) - np.array(t['center'])) > 2*radius for t in tumours):
-                tumours.append({
-                    'type': 'sphere',
-                    'center': center,
-                    'radius': radius,
-                    'net_rate': -10.0,
-                    'name': f'tumor_region_{i+1}'
-                })
-                break
+    # Create scenarios by modifying base scenario parameters
+    store = True
 
-    multiple_tumor_2d = create_scenario_with_numerical_reference_cached(
-        name='multiple_tumor_2d',
-        schema_class=ADIBCSchema, # reference schema class for golden solution
-        domain_size=(2000.0, 2000.0), # assuming in micrometers for a 2mm x 2mm tissue section
-        grid_points=(100, 100), # dx forced to 20 micrometers, leading to a 100x100 grid
-        dt=0.05, # minutes
-        t_final=5, # minutes (64800 minutes = 45 days)
-        initial_condition={
-            'type': 'uniform',
-            'value': 38.0 # mmHg
-        },
-        diffusion_coefficient=float(1e5), # μm^2/min
-        decay_rate=0.1, # per minute
-        boundary_condition={
-            'type': 'dirichlet',
-            'value': 38.0 # mmHg
-        },
-        bulk={
-            'regions': tumours  # directly pass the generated list of dictionaries for tumor regions
-        },
-        dx_ref=10.0,
-        dt_ref=0.0001,
-        description=f'2D diffusion with decay and multiple ({len(tumours)}) non-overlapping tumor regions'
-    )
+    multiple_tumor_2d_dt05_dx20 = copy.deepcopy(get_scenario_by_name('multiple_tumor_2d'))
+    multiple_tumor_2d_dt05_dx20["dt"] = 0.5
+    multiple_tumor_2d_dt05_dx20["t_final"] = 10
+    multiple_tumor_2d_dt05_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt05_dx20["domain_size"])
+    multiple_tumor_2d_dt05_dx20["name"] = "multiple_tumor_2d_dt05_dx20"
+    multiple_tumor_2d_dt05_dx20["store_history"] = store
+    multiple_tumor_2d_dt05_dx20["golden_solution"]["dt_ref"] = 0.001
+
+    multiple_tumor_2d_dt04_dx20 = copy.deepcopy(get_scenario_by_name('multiple_tumor_2d'))
+    multiple_tumor_2d_dt04_dx20["dt"] = 0.4
+    multiple_tumor_2d_dt04_dx20["t_final"] = 10
+    multiple_tumor_2d_dt04_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt04_dx20["domain_size"])
+    multiple_tumor_2d_dt04_dx20["name"] = "multiple_tumor_2d_dt04_dx20"
+    multiple_tumor_2d_dt04_dx20["store_history"] = store
+    multiple_tumor_2d_dt04_dx20["golden_solution"]["dt_ref"] = 0.001
+
+    multiple_tumor_2d_dt03_dx20 = copy.deepcopy(get_scenario_by_name('multiple_tumor_2d'))
+    multiple_tumor_2d_dt03_dx20["dt"] = 0.3
+    multiple_tumor_2d_dt03_dx20["t_final"] = 10
+    multiple_tumor_2d_dt03_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt03_dx20["domain_size"])
+    multiple_tumor_2d_dt03_dx20["name"] = "multiple_tumor_2d_dt03_dx20"
+    multiple_tumor_2d_dt03_dx20["store_history"] = store
+    multiple_tumor_2d_dt03_dx20["golden_solution"]["dt_ref"] = 0.001
+
+    multiple_tumor_2d_dt02_dx20 = copy.deepcopy(get_scenario_by_name('multiple_tumor_2d'))
+    multiple_tumor_2d_dt02_dx20["dt"] = 0.2
+    multiple_tumor_2d_dt02_dx20["t_final"] = 10
+    multiple_tumor_2d_dt02_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt02_dx20["domain_size"])
+    multiple_tumor_2d_dt02_dx20["name"] = "multiple_tumor_2d_dt02_dx20"
+    multiple_tumor_2d_dt02_dx20["store_history"] = store
+    multiple_tumor_2d_dt02_dx20["golden_solution"]["dt_ref"] = 0.001
+
+    multiple_tumor_2d_dt01_dx20 = copy.deepcopy(get_scenario_by_name('multiple_tumor_2d'))
+    multiple_tumor_2d_dt01_dx20["dt"] = 0.1
+    multiple_tumor_2d_dt01_dx20["t_final"] = 10
+    multiple_tumor_2d_dt01_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt01_dx20["domain_size"])
+    multiple_tumor_2d_dt01_dx20["name"] = "multiple_tumor_2d_dt01_dx20"
+    multiple_tumor_2d_dt01_dx20["store_history"] = store
+    multiple_tumor_2d_dt01_dx20["golden_solution"]["dt_ref"] = 0.001
+
+    multiple_tumor_2d_dt005_dx20 = copy.deepcopy(get_scenario_by_name('multiple_tumor_2d'))
+    multiple_tumor_2d_dt005_dx20["dt"] = 0.05
+    multiple_tumor_2d_dt005_dx20["t_final"] = 10
+    multiple_tumor_2d_dt005_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt005_dx20["domain_size"])
+    multiple_tumor_2d_dt005_dx20["name"] = "multiple_tumor_2d_dt005_dx20"
+    multiple_tumor_2d_dt005_dx20["store_history"] = store
+    multiple_tumor_2d_dt005_dx20["golden_solution"]["dt_ref"] = 0.001
+
+    multiple_tumor_2d_dt001_dx20 = copy.deepcopy(get_scenario_by_name('multiple_tumor_2d'))
+    multiple_tumor_2d_dt001_dx20["dt"] = 0.01
+    multiple_tumor_2d_dt001_dx20["t_final"] = 10
+    multiple_tumor_2d_dt001_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt001_dx20["domain_size"])
+    multiple_tumor_2d_dt001_dx20["name"] = "multiple_tumor_2d_dt001_dx20"
+    multiple_tumor_2d_dt001_dx20["store_history"] = store
+    multiple_tumor_2d_dt001_dx20["golden_solution"]["dt_ref"] = 0.001
+
+    # multiple_tumor_2d_dt0005_dx20 = copy.deepcopy(get_scenario_by_name('multiple_tumor_2d'))
+    # multiple_tumor_2d_dt0005_dx20["dt"] = 0.005
+    # multiple_tumor_2d_dt0005_dx20["t_final"] = 10
+    # multiple_tumor_2d_dt0005_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt0005_dx20["domain_size"])
+    # multiple_tumor_2d_dt0005_dx20["name"] = "multiple_tumor_2d_dt0005_dx20"
+    # multiple_tumor_2d_dt0005_dx20["store_history"] = store
+    # multiple_tumor_2d_dt0005_dx20["golden_solution"]["dt_ref"] = 0.001
+
+    # multiple_tumor_2d_dt0001_dx20 = copy.deepcopy(get_scenario_by_name('multiple_tumor_2d'))
+    # multiple_tumor_2d_dt0001_dx20["dt"] = 0.001
+    # multiple_tumor_2d_dt0001_dx20["t_final"] = 10
+    # multiple_tumor_2d_dt0001_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt0001_dx20["domain_size"])
+    # multiple_tumor_2d_dt0001_dx20["name"] = "multiple_tumor_2d_dt0001_dx20"
+    # multiple_tumor_2d_dt0001_dx20["store_history"] = store
+    # multiple_tumor_2d_dt0001_dx20["golden_solution"]["dt_ref"] = 0.001
+
+    # multiple_tumor_2d_dt00001_dx20 = copy.deepcopy(get_scenario_by_name('multiple_tumor_2d'))
+    # multiple_tumor_2d_dt00001_dx20["dt"] = 0.0001
+    # multiple_tumor_2d_dt00001_dx20["t_final"] = 10
+    # multiple_tumor_2d_dt00001_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt00001_dx20["domain_size"])
+    # multiple_tumor_2d_dt00001_dx20["name"] = "multiple_tumor_2d_dt00001_dx20"
+
+    # multiple_tumor_2d_dt001_dx10 = copy.deepcopy(get_scenario_by_name('multiple_tumor_2d'))
+    # multiple_tumor_2d_dt001_dx10["dt"] = 0.01
+    # multiple_tumor_2d_dt001_dx10["t_final"] = 5
+    # multiple_tumor_2d_dt001_dx10["grid_points"] = tuple(int(s / 10.0) for s in multiple_tumor_2d_dt001_dx10["domain_size"])
+    # multiple_tumor_2d_dt001_dx10["name"] = "multiple_tumor_2d_dt001_dx10"
+
+    # multiple_tumor_2d_dt001_dx30 = copy.deepcopy(get_scenario_by_name('multiple_tumor_2d'))
+    # multiple_tumor_2d_dt001_dx30["dt"] = 0.01
+    # multiple_tumor_2d_dt001_dx30["t_final"] = 5
+    # multiple_tumor_2d_dt001_dx30["grid_points"] = tuple(int(s / 30.0) for s in multiple_tumor_2d_dt001_dx30["domain_size"])
+    # multiple_tumor_2d_dt001_dx30["name"] = "multiple_tumor_2d_dt001_dx30"
+
+    # multiple_tumor_2d_dt001_dx40 = copy.deepcopy(get_scenario_by_name('multiple_tumor_2d'))
+    # multiple_tumor_2d_dt001_dx40["dt"] = 0.01
+    # multiple_tumor_2d_dt001_dx40["t_final"] = 5
+    # multiple_tumor_2d_dt001_dx40["grid_points"] = tuple(int(s / 40.0) for s in multiple_tumor_2d_dt001_dx40["domain_size"])
+    # multiple_tumor_2d_dt001_dx40["name"] = "multiple_tumor_2d_dt001_dx40"
 
     runner = BenchmarkRunner()
 
     # runner.add_schema(ExplicitEulerBCSchema, "Explicit Euler")
-    runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
+    # runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
+    # runner.add_schema(ImplicitLODBCSchema, "Implicit LOD")
+    # runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
+    # runner.add_schema(CrankNicolsonLODBCSchema, "Crank-Nicolson LOD")
     runner.add_schema(ADIBCSchema, "ADI")
-    runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
-    runner.add_schema(CrankNicolsonADIBCSchema, "Crank-Nicolson ADI")
 
-    runner.add_scenario(multiple_tumor_2d)
+    runner.add_scenario(multiple_tumor_2d_dt05_dx20)
+    runner.add_scenario(multiple_tumor_2d_dt04_dx20)
+    runner.add_scenario(multiple_tumor_2d_dt03_dx20)
+    runner.add_scenario(multiple_tumor_2d_dt02_dx20)
+    runner.add_scenario(multiple_tumor_2d_dt01_dx20)
+    runner.add_scenario(multiple_tumor_2d_dt005_dx20)
+    runner.add_scenario(multiple_tumor_2d_dt001_dx20)
+    # runner.add_scenario(multiple_tumor_2d_dt0005_dx20)
+    # runner.add_scenario(multiple_tumor_2d_dt0001_dx20)
     
+
+    # fig = plot_scenario(
+    #     scenario=multiple_tumor_2d_dt01_dx20,
+    # )
+    # plt.show()
+
     results = runner.run(
         output_dir='benchmark_results/multiple_tumor',
-        store_history=True,
+        store_history=store,
         generate_plots=True
     )
     
     summary = runner.generate_summary_report(
-        output_path='benchmark_results/multiple_tumor/summary.csv'
+        output_path='benchmark_results/multiple_tumor/summary_ADI_BC.csv'
     )
-    
+
     return results, summary
 
 def main():

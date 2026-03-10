@@ -27,9 +27,9 @@ from benchmarking import (
 # Schema imports
 from diffusion_schemas import (
     ExplicitEulerSchema, ImplicitEulerSchema, CrankNicolsonSchema,
-    ADISchema, CrankNicolsonADISchema,
+    ImplicitLODSchema, CrankNicolsonLODSchema,
     ExplicitEulerBCSchema, ImplicitEulerBCSchema, CrankNicolsonBCSchema,
-    ADIBCSchema, CrankNicolsonADIBCSchema
+    ImplicitLODBCSchema, CrankNicolsonLODBCSchema
 )
 
 # Utilities for backward compatibility example
@@ -51,11 +51,11 @@ def run_basic_benchmark():
     runner = BenchmarkRunner()
     
     # Add schemas to test
-    runner.add_schema(ExplicitEulerSchema, "Explicit Euler")
-    runner.add_schema(ImplicitEulerSchema, "Implicit Euler")
-    runner.add_schema(ADISchema, "ADI")
-    runner.add_schema(CrankNicolsonSchema, "Crank-Nicolson")
-    runner.add_schema(CrankNicolsonADISchema, "Crank-Nicolson ADI")
+    runner.add_schema(ExplicitEulerBCSchema, "Explicit Euler")
+    runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
+    runner.add_schema(ImplicitLODBCSchema, "Implicit LOD")
+    runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
+    runner.add_schema(CrankNicolsonLODBCSchema, "Crank-Nicolson LOD")
     
     # Add default 2D Gaussian pulse scenario
     scenario = get_scenario_by_name('gaussian_pulse_2d')
@@ -63,18 +63,17 @@ def run_basic_benchmark():
     
     # Run benchmarks
     results = runner.run(
-        output_dir='benchmark_results/basic',
+        output_dir='benchmark_results/basic_bc',
         store_history=True,
         generate_plots=True
     )
     
     # Generate summary report
     summary = runner.generate_summary_report(
-        output_path='benchmark_results/basic/summary.csv'
+        output_path='benchmark_results/basic_bc/summary.csv'
     )
     
     return results, summary
-
 
 def run_1d_benchmark():
     """
@@ -89,9 +88,9 @@ def run_1d_benchmark():
     # Add schemas
     runner.add_schema(ExplicitEulerSchema, "Explicit Euler")
     runner.add_schema(ImplicitEulerSchema, "Implicit Euler")
-    runner.add_schema(ADISchema, "ADI")
+    runner.add_schema(ImplicitLODSchema, "Implicit LOD")
     runner.add_schema(CrankNicolsonSchema, "Crank-Nicolson")
-    runner.add_schema(CrankNicolsonADISchema, "Crank-Nicolson ADI")
+    runner.add_schema(CrankNicolsonLODSchema, "Crank-Nicolson LOD")
     
     # Add 1D scenario
     scenario = get_scenario_by_name('gaussian_pulse_1d')
@@ -149,16 +148,16 @@ def run_convergence_analysis():
     )
 
     print("\nTemporal convergence for ADI:")
-    conv_results_adi = runner.run_convergence_analysis(
-        schema_class=ADISchema,
-        schema_name="ADI",
+    conv_results_lod = runner.run_convergence_analysis(
+        schema_class=ImplicitLODSchema,
+        schema_name="Implicit LOD",
         scenario_base=scenario,
         refinement_type='dt',
         refinement_factors=[0.01, 0.005, 0.0025, 0.00125],
         output_dir='benchmark_results/convergence_2D'
     )
     
-    return conv_results_cn, conv_results_ie, conv_results_adi
+    return conv_results_cn, conv_results_ie, conv_results_lod
 
 def run_convergence_analysis_spatial():
     """
@@ -199,16 +198,16 @@ def run_convergence_analysis_spatial():
     )
 
     print("\nSpatial convergence for ADI:")
-    conv_results_adi = runner.run_convergence_analysis(
-        schema_class=ADISchema,
-        schema_name="ADI",
+    conv_results_lod = runner.run_convergence_analysis(
+        schema_class=ImplicitLODSchema,
+        schema_name="Implicit LOD",
         scenario_base=scenario,
         refinement_type='dx',
         refinement_factors=None,
         output_dir='benchmark_results/convergence_2D_spatial'
     )
     
-    return conv_results_cn, conv_results_ie, conv_results_adi
+    return conv_results_cn, conv_results_ie, conv_results_lod
 
 def run_custom_scenario():
     """
@@ -250,13 +249,13 @@ def run_custom_scenario():
         description='Custom scenario with faster diffusion on larger domain'
     )
     
-    # Test with ADI method (efficient for 2D)
+    # Test with LOD method (efficient for 2D)
     runner = BenchmarkRunner()
     runner.add_schema(ExplicitEulerSchema, "Explicit Euler")
     runner.add_schema(ImplicitEulerSchema, "Implicit Euler")
-    runner.add_schema(ADISchema, "ADI")
+    runner.add_schema(ImplicitLODSchema, "Implicit LOD")
     runner.add_schema(CrankNicolsonSchema, "Crank-Nicolson")
-    runner.add_schema(CrankNicolsonADISchema, "Crank-Nicolson ADI")
+    runner.add_schema(CrankNicolsonLODSchema, "Crank-Nicolson LOD")
     runner.add_scenario(custom_scenario)
     
     results = runner.run(
@@ -283,9 +282,9 @@ def run_step_function_1d():
 
     runner.add_schema(ExplicitEulerBCSchema, "Explicit Euler")
     runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
-    runner.add_schema(ADIBCSchema, "ADI")
+    runner.add_schema(ImplicitLODBCSchema, "Implicit LOD")
     runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
-    runner.add_schema(CrankNicolsonADIBCSchema, "Crank-Nicolson ADI")
+    runner.add_schema(CrankNicolsonLODBCSchema, "Crank-Nicolson LOD")
 
     runner.add_scenario(step_function_1d)
     
@@ -301,7 +300,6 @@ def run_step_function_1d():
     
     return results, summary
 
-
 def run_step_function_2d():
     
     print("\n" + "=" * 70)
@@ -314,9 +312,9 @@ def run_step_function_2d():
 
     runner.add_schema(ExplicitEulerSchema, "Explicit Euler")
     runner.add_schema(ImplicitEulerSchema, "Implicit Euler")
-    runner.add_schema(ADISchema, "ADI")
+    runner.add_schema(ImplicitLODSchema, "Implicit LOD")
     runner.add_schema(CrankNicolsonSchema, "Crank-Nicolson")
-    runner.add_schema(CrankNicolsonADISchema, "Crank-Nicolson ADI")
+    runner.add_schema(CrankNicolsonLODSchema, "Crank-Nicolson LOD")
 
     runner.add_scenario(step_function_2d)
     
@@ -345,7 +343,7 @@ def run_all_dimensions():
     # Add schemas (ADI methods work well in multiple dimensions)
     runner.add_schema(ImplicitEulerSchema, "Implicit Euler")
     runner.add_schema(CrankNicolsonSchema, "Crank-Nicolson")
-    runner.add_schema(ADISchema, "ADI")
+    runner.add_schema(ImplicitLODSchema, "Implicit LOD")
     
     # Add all default scenarios (1D, 2D, 3D)
     scenarios = get_default_scenarios()
@@ -364,7 +362,6 @@ def run_all_dimensions():
     )
     
     return results, summary
-
 
 def run_backward_compatible_example():
     """
@@ -407,7 +404,6 @@ def run_backward_compatible_example():
     print(f"  Min Concentration: {results['min_concentration']:.4f}")
     
     return results
-
 
 def run_validation_scenario_example():
     """
@@ -458,10 +454,10 @@ def main():
     # results2, summary2 = run_1d_benchmark()
     
     # Example 3: Convergence analysis (verifies order of accuracy)
-    # conv_cn, conv_ie, conv_adi = run_convergence_analysis()
+    # conv_cn, conv_ie, conv_lod = run_convergence_analysis()
 
     # Examle 3b: Spatial convergence analysis
-    # conv_cn_spatial, conv_ie_spatial, conv_adi_spatial = run_convergence_analysis_spatial()
+    # conv_cn_spatial, conv_ie_spatial, conv_lod_spatial = run_convergence_analysis_spatial()
     
     # Example 4: Custom scenario
     # results4, summary4 = run_custom_scenario()
@@ -476,8 +472,8 @@ def main():
     # results7 = run_validation_scenario_example()
 
     # Example 8: Step functions
-    results8, summary8 = run_step_function_1d()
-    # results8, summary8 = run_step_function_2d()
+    # results8, summary8 = run_step_function_1d()
+    results8, summary8 = run_step_function_2d()
 
     print("\n" + "=" * 70)
     print("All examples completed!")

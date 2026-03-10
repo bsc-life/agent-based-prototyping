@@ -5,8 +5,8 @@ import time
 from diffusion_schemas import ImplicitEulerBCSchema, ImplicitEulerSchema, \
     ExplicitEulerBCSchema, ExplicitEulerSchema, \
     CrankNicolsonBCSchema, CrankNicolsonSchema, \
-    ADIBCSchema, ADISchema,\
-    CrankNicolsonADIBCSchema, CrankNicolsonADISchema
+    ImplicitLODBCSchema, ImplicitLODSchema,\
+    CrankNicolsonLODBCSchema, CrankNicolsonLODSchema
 from diffusion_schemas.utils import gaussian, NeumannBC, DirichletBC
 
 def main():
@@ -59,19 +59,19 @@ def main():
     }
 
     methods4 = {
-        "ADI (Integrated - BC)": ADIBCSchema(
+        "ADI (Integrated - BC)": ImplicitLODBCSchema(
             domain_size=L, grid_points=N, dt=dt, diffusion_coefficient=D
         ),
-        "ADI (Operator Splitting - BC)": ADISchema(
+        "ADI (Operator Splitting - BC)": ImplicitLODSchema(
             domain_size=L, grid_points=N, dt=dt, diffusion_coefficient=D
         )
     }
 
     methods5 = {
-        "Crank-Nicolson ADI (Integrated - BC)": CrankNicolsonADIBCSchema(
+        "Crank-Nicolson LOD (Integrated - BC)": CrankNicolsonLODBCSchema(
             domain_size=L, grid_points=N, dt=dt, diffusion_coefficient=D
         ),
-        "Crank-Nicolson ADI (Operator Splitting - BC)": CrankNicolsonADISchema(
+        "Crank-Nicolson LOD (Operator Splitting - BC)": CrankNicolsonLODSchema(
             domain_size=L, grid_points=N, dt=dt, diffusion_coefficient=D
         )
     }

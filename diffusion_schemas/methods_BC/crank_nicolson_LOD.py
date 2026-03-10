@@ -1,5 +1,5 @@
 """
-Crank-Nicolson method for diffusion equation using ADI splitting.
+Crank-Nicolson method for diffusion equation using LOD splitting.
 
 This module implements the Crank-Nicolson finite difference scheme with
 Alternating Direction Implicit (ADI) splitting. It integrates Neumann and 
@@ -14,7 +14,7 @@ from diffusion_schemas.base import Schema
 from diffusion_schemas.utils.boundary import DirichletBC, NeumannBC
 
 
-class CrankNicolsonADIBCSchema(Schema):
+class CrankNicolsonLODBCSchema(Schema):
     """
     Crank-Nicolson method for the diffusion equation using ADI.
     
@@ -22,7 +22,7 @@ class CrankNicolsonADIBCSchema(Schema):
     
     - Explicit Part (RHS): Evaluated using modified finite difference stencils 
       to account for BCs at time n.
-    - Implicit Part (LHS): Solved using ADI splitting, with BCs injected 
+    - Implicit Part (LHS): Solved using LOD splitting, with BCs injected 
       directly into the tridiagonal systems at time n+1.
     
     Parameters
@@ -93,7 +93,7 @@ class CrankNicolsonADIBCSchema(Schema):
         """Build the 2D system matrices using Kronecker products."""
         Nx, Ny = self.grid_points
         dx, dy = self.dx
-        factor = 1 / 2 # ADI factor for 2D splitting
+        factor = 1 / 2 # LOD factor for 2D splitting
         
         # 1D Laplacian operators
         diag_main_x = -2 * np.ones(Nx) / (dx**2)
@@ -119,7 +119,7 @@ class CrankNicolsonADIBCSchema(Schema):
         """Build the 3D system matrices using Kronecker products."""
         Nx, Ny, Nz = self.grid_points
         dx, dy, dz = self.dx
-        factor = 1 / 3 # ADI factor for 3D splitting
+        factor = 1 / 3 # LOD factor for 3D splitting
         
         # 1D Laplacian operators
         diag_main_x = -2 * np.ones(Nx) / (dx**2)
@@ -161,11 +161,12 @@ class CrankNicolsonADIBCSchema(Schema):
         explicit_term = self.step_explicit()
 
         # 2. Build full RHS: u^n + explicit_term + source terms
-        rhs_grid = self.state + explicit_term + self.dt * source_np1
-        
+        # Same expression as in the crank_nicolson.py file at the end
+        rhs_grid = self.state + explicit_term + self.dt * ((1 - self.theta) * source_n + self.theta * source_np1)        
+
         # 3. Solve the Implicit System (ADI)
         # We inject the Implicit BC logic here into the matrix solves
-        u_new_grid = self.step_adi(rhs_grid) 
+        u_new_grid = self.step_lod(rhs_grid) 
         
         # Reshape to grid
         self.state = u_new_grid
@@ -191,10 +192,10 @@ class CrankNicolsonADIBCSchema(Schema):
 
         return explicit_term
 
-    def step_adi(self, rhs):
+    def step_lod(self, rhs):
         """
-        Solve the implicit system using ADI splitting.
-        Integrates Implicit BCs into each sweep using the ADI logic.
+        Solve the implicit system using LOD splitting.
+        Integrates Implicit BCs into each sweep using the LOD logic.
         """
         
         if self.ndim == 1:
@@ -253,11 +254,11 @@ class CrankNicolsonADIBCSchema(Schema):
             self.state = spsolve(Az.tocsr(), rhs_z)
             self.state = self.state.reshape(Nz, Nx, Ny).transpose(1,2,0)
 
-        # Fix return type in step_adi
+        # Fix return type in step_lod
         return self.state 
     
     # =========================================================================
-    # HELPER: IMPLICIT BC LOGIC (From ADI Schema)
+    # HELPER: IMPLICIT BC LOGIC (From LOD Schema)
     # =========================================================================
     def _apply_bc_to_sweep(self, matrix, rhs_array, h):
         """

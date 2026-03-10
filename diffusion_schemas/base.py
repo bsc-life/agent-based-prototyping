@@ -307,8 +307,9 @@ class Schema(ABC):
         if t_final <= self.t:
             raise ValueError(f"t_final ({t_final}) must be greater than current time ({self.t})")
         
-        history = [] if store_history else None
-        
+        # history = [] if store_history else None
+        history = []
+
         if store_history:
             history.append(self.state.copy())
         
@@ -328,9 +329,9 @@ class Schema(ABC):
 
                 # Solve BC integration into matrices problem
 
-                # if isinstance(self, (ImplicitEulerBCSchema, ADIBCSchema)):
+                # if isinstance(self, (ImplicitEulerBCSchema, ImplicitLODBCSchema)):
                 #     self._build_system_matrix()  # Rebuild system matrix with new dt
-                # elif isinstance(self, (CrankNicolsonADIBCSchema, CrankNicolsonBCSchema)):
+                # elif isinstance(self, (CrankNicolsonLODBCSchema, CrankNicolsonBCSchema)):
                 #     self._build_system_matrices()  # Rebuild system matrix with new dt
                                 # Rebuild system matrix if method exists
 
@@ -354,6 +355,9 @@ class Schema(ABC):
         # Close progress bar if it was used
         if pbar is not None:
             pbar.close()
+
+        if not store_history:
+            history.append(self.state.copy())
 
         return history
     

@@ -268,64 +268,6 @@ class ImplicitEulerBCSchema(Schema):
         
         return A, rhs
 
-        """
-        if self.ndim == 1:
-            N = self.grid_points
-            dx = self.dx
-            
-            # Left boundary (i=0): one-sided stencil (u[1] - u[0]) / dx
-            self.system_matrix[0, :] = 0
-            self.system_matrix[0, 0] = -1 / (dx**2)
-            self.system_matrix[0, 1] = 1 / (dx**2)
-            rhs[0] = -2 * flux / dx
-            
-            # Right boundary (i=N-1): one-sided stencil (u[N-2] - u[N-1]) / dx
-            self.system_matrix[-1, :] = 0
-            self.system_matrix[-1, -2] = 1 / (dx**2)
-            self.system_matrix[-1, -1] = -1 / (dx**2)
-            rhs[-1] = 2 * flux / dx
-
-        if self.ndim == 2:
-            Nx, Ny = self.grid_points
-            dx, dy = self.dx
-            
-            # Left boundary (i=0) and right boundary (i=Nx-1)
-            for j in range(Ny):
-                idx_left = j * Nx  # index of (0, j)
-                idx_right = j * Nx + (Nx - 1)  # index of (Nx-1, j)
-
-                self.system_matrix[idx_left, :] = 0
-                self.system_matrix[idx_left, idx_left] = -1 / (dx**2)
-                self.system_matrix[idx_left, idx_left + Ny] = 1 / (dx**2)
-                self.system_matrix[idx_right, :] = 0
-                self.system_matrix[idx_right, idx_right - Ny] = 1 / (dx**2)
-                self.system_matrix[idx_right, idx_right] = -1 / (dx**2)
-
-                rhs[idx_left] += self.dt * self.diffusion_coefficient * flux / dx
-                rhs[idx_right] -= self.dt * self.diffusion_coefficient * flux / dx
-
-            # Bottom boundary (j=0) and top boundary (j=Ny-1)
-            for i in range(Nx):
-                idx_bottom = i  # index of (i, 0)
-                idx_top = (Ny - 1) * Nx + i  # index of (i, Ny-1)
-
-                self.system_matrix[idx_bottom, :] = 0
-                self.system_matrix[idx_bottom, idx_bottom] = -1 / (dy**2)
-                self.system_matrix[idx_bottom, idx_bottom + Nx] = 1 / (dy**2)
-                self.system_matrix[idx_top, :] = 0
-                self.system_matrix[idx_top, idx_top - Nx] = 1 / (dy**2)
-                self.system_matrix[idx_top, idx_top] = -1 / (dy**2)
-
-                rhs[idx_bottom] += self.dt * self.diffusion_coefficient * flux / dy
-                rhs[idx_top] -= self.dt * self.diffusion_coefficient * flux / dy
-
-        if self.ndim == 3:
-            Nx, Ny, Nz = self.grid_points
-            dx, dy, dz = self.dx
-
-            ???
-        """
-
     def _apply_neumann_bc(self, A, rhs):
         flux = self._boundary_conditions._get_flux(self.t + self.dt)
         D = self.diffusion_coefficient

@@ -12,7 +12,7 @@ from scipy.sparse.linalg import spsolve
 from diffusion_schemas.base import Schema
 
 
-class ADISchema(Schema):
+class ImplicitLODSchema(Schema):
     """
     Alternating Direction Implicit (ADI) method for the diffusion equation.
     
@@ -154,7 +154,7 @@ class ADISchema(Schema):
         rhs = self.state + self.dt * source
         
         # Case distinguish based on dimensionality of the problem
-        # ADI implementation
+        # LOD implementation
 
         if self.ndim == 1:
             # Solve the linear system A * u^(n+1) = rhs

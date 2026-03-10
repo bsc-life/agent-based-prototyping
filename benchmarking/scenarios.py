@@ -14,7 +14,7 @@ from diffusion_schemas.utils.boundary import (
     DirichletBC, NeumannBC, PeriodicBC, RobinBC, BoundaryCondition
 )
 from diffusion_schemas.utils.agents import Agent, CompleteAgent
-from diffusion_schemas.utils.bulk import Bulk, Region, RectangleRegion, SphereRegion
+from diffusion_schemas.utils.bulk import Bulk, Region, LinearRegion, TargetRegion, RectangleRegion, SphereRegion
 from benchmarking.golden_solutions import (
     GoldenSolution, GaussianDiffusion1D, GaussianDiffusion2D, GaussianDiffusion3D, StepFunctionDiffusion1D,
     create_golden_solution_from_dict,
@@ -255,9 +255,11 @@ def _build_bulk(bulk_spec: Union[Dict[str, Any], Bulk, None]) -> Union[Bulk, Non
             return bulk
         
         for region_spec in regions:
+            use_target_bulk = ('rho_target' in region_spec)
+            use_linear_bulk = ('linear_rate' in region_spec and not use_target_bulk)
+
             region_type = region_spec.get('type')
             name = region_spec.get('name', '')
-            net_rate = region_spec.get('net_rate', 0.0)
             
             if region_type == 'rectangle':
                 domain = RectangleRegion(
@@ -272,15 +274,25 @@ def _build_bulk(bulk_spec: Union[Dict[str, Any], Bulk, None]) -> Union[Bulk, Non
             else:
                 raise ValueError(f"Unknown region type: {region_type}")
             
-            region = Region(domain=domain, net_rate=net_rate, name=name)
+            if use_linear_bulk:
+                linear_rate = region_spec.get('linear_rate', 0.0)
+                region = LinearRegion(domain=domain, linear_rate=linear_rate, name=name)
+            elif use_target_bulk:
+                linear_rate = region_spec.get('linear_rate', 0.0)
+                rho_target = region_spec.get('rho_target', 0.0)
+                region = TargetRegion(domain=domain, linear_rate=linear_rate, rho_target=rho_target, name=name)
+            else:
+                net_rate = region_spec.get('net_rate', 0.0)
+                region = Region(domain=domain, net_rate=net_rate, name=name)
             bulk.add_region(region)
-        
+    
         return bulk
     
     raise TypeError(f"Invalid bulk specification type: {type(bulk_spec)}")
 
 def _build_golden_solution(golden_spec: Union[Dict[str, Any], GoldenSolution, Callable],
-                           scenario_params: Union[Dict[str, Any], None] = None
+                           scenario_params: Union[Dict[str, Any], None] = None,
+                           store_history: bool = True
                            ) -> Union[GoldenSolution, Callable]:
     """
     Build golden solution from specification.
@@ -311,7 +323,7 @@ def _build_golden_solution(golden_spec: Union[Dict[str, Any], GoldenSolution, Ca
             if scenario_params is None:
                 raise ValueError("numerical_reference requires scenario_params")
             golden_spec = {**golden_spec, 'scenario_params': scenario_params}
-        return create_golden_solution_from_dict(golden_spec)
+        return create_golden_solution_from_dict(golden_spec, store_history=store_history)
     return golden_spec
 
 def create_scenario(name: str,
@@ -412,7 +424,7 @@ def create_scenario_with_numerical_reference(
     name : str
         Scenario name.
     schema_class : class
-        Schema class to use for reference solution (e.g., ADISchema).
+        Schema class to use for reference solution (e.g., ImplicitLODSchema).
     domain_size : float or tuple
         Domain size.
     grid_points : int or tuple
@@ -504,6 +516,7 @@ def create_scenario_with_numerical_reference_cached(
     dx_ref: float = 1e-3,
     dt_ref: float = 1e-3,
     cache_dir: str = 'benchmark_results/.golden_cache',
+    store_history: bool = True,
     **metadata
 ) -> Dict[str, Any]:
     """
@@ -535,7 +548,8 @@ def create_scenario_with_numerical_reference_cached(
         scenario_params=scenario_params,
         dx_ref=dx_ref,
         dt_ref=dt_ref,
-        cache_dir=cache_dir
+        cache_dir=cache_dir,
+        store_history=store_history
     )
 
     # Build the scenario with the already-resolved golden solution object
@@ -556,7 +570,7 @@ def create_scenario_with_numerical_reference_cached(
     )
 
 
-def build_scenario_components(scenario: Dict[str, Any]) -> Dict[str, Any]:
+def build_scenario_components(scenario: Dict[str, Any], store_history: bool = True) -> Dict[str, Any]:
     """
     Build actual objects from scenario specification.
     
@@ -590,7 +604,8 @@ def build_scenario_components(scenario: Dict[str, Any]) -> Dict[str, Any]:
     built['boundary_condition'] = _build_boundary_condition(scenario['boundary_condition'])
     built['agents'] = _build_agents(scenario.get('agents', None))
     built['golden_solution'] = _build_golden_solution(scenario.get('golden_solution'), 
-                                                      scenario_params = scenario_params)
+                                                      scenario_params = scenario_params,
+                                                      store_history = store_history)
     built['bulk'] = _build_bulk(scenario.get('bulk', None))
 
     return built
@@ -944,17 +959,17 @@ COSINE_DIFFUSION_1D = {
     'name': 'cosine_diffusion_1d',
     'description': 'First convergence test',
     
-    'domain_size': 1.0,
-    'grid_points': 100,
+    'domain_size': 1000,
+    'grid_points': int(1000 / 5),
     'dt': 0.00001,
-    't_final': 0.2,
+    't_final': 2,
     
-    'diffusion_coefficient': 1,
+    'diffusion_coefficient': 1e5,
     'decay_rate': 0.0,
     
     'initial_condition': {
         'type': 'custom',
-        'function': lambda x: 1 + np.cos(np.pi * x / 0.5)
+        'function': lambda x: 1 + np.cos(np.pi * (x-500) / 500)
     },
     
     'boundary_condition': {
@@ -964,12 +979,46 @@ COSINE_DIFFUSION_1D = {
     
     'agents': None,
 
-    'golden_solution': lambda x, t: (1.0 + np.cos(np.pi * np.asarray(x).flatten() / 0.5) * np.exp(- (np.pi / 0.5)**2 * t))
+    'golden_solution': lambda x, t: (1.0 + np.cos(np.pi * (np.asarray(x).flatten()-500) / 500) * np.exp(- np.pi ** 2 * 1e5 / 500 ** 2 * t))
+}
+
+COSINE_DIFFUSION_2D = {
+    # BioFVM convergence test 1: 1D diffusion with cosine initial condition and zero-flux boundaries
+    'name': 'cosine_diffusion_2d',
+    'description': 'First convergence test',
+    
+    'domain_size': (1000.0, 1000.0),
+    'grid_points': (int(1000 / 5), int(1000 / 5)),
+    'dt': 0.00001,
+    't_final': 2,
+    
+    'diffusion_coefficient': 1e5,
+    'decay_rate': 0.0,
+    
+    'initial_condition': {
+        'type': 'custom',
+        'function': lambda x, y: (1 + np.cos(np.pi * (x-500) / 500)) * \
+                                 (1 + np.cos(np.pi * (y-500) / 500))
+    },
+    
+    'boundary_condition': {
+        'type': 'neumann',
+        'value': 0.0
+    },
+    
+    'agents': None,
+
+    'golden_solution': lambda x, y, t: (
+        (1.0 + np.cos(np.pi * (np.asarray(x)-500) / 500) * np.exp(- np.pi**2 * 1e5 / 500**2 * t)) *
+        (1.0 + np.cos(np.pi * (np.asarray(y)-500) / 500) * np.exp(- np.pi**2 * 1e5 / 500**2 * t))
+    )
 }
 
 # ==============================================================================
 # Complex examples
 # ==============================================================================
+
+from diffusion_schemas.methods_BC import ImplicitLODBCSchema
 
 SINGLE_TUMOR_2D = {
     'name': 'single_tumor_2d',
@@ -977,7 +1026,7 @@ SINGLE_TUMOR_2D = {
     
     # NOTE TIME UNITS ARE IN MINUTES
     'domain_size': (2000.0, 2000.0),
-    'grid_points': (2000.0/20, 2000.0/20),
+    'grid_points': (int(2000.0/20), int(2000.0/20)),
     'dt': 0.01,
     't_final': 64800,
     
@@ -1009,10 +1058,67 @@ SINGLE_TUMOR_2D = {
     # No analytical solution for this complex scenario
     'golden_solution': {
         'type': 'numerical_reference',
-        'schema_class': None, # Will use ADIBCSchema by default
+        'schema_class': None, # Will use ImplicitLODBCSchema by default
         'dx_ref': 10.0, # Finer spatial resolution for reference
         'dt_ref': 0.0001
-    }
+    },
+
+    'store_history': False # Don't store history for this one to save memory, since the reference solution is large and we only care about final state
+}
+
+np.random.seed(20)  # for reproducibility
+tumours = []
+n = 30
+radius = 10.0
+for i in range(n):
+    while True:
+        center = (np.random.uniform(250, 1750), np.random.uniform(250, 1750))
+        # Check for overlap with existing tumors
+        if all(np.linalg.norm(np.array(center) - np.array(t['center'])) > 2*radius for t in tumours):
+            tumours.append({
+                'type': 'sphere',
+                'center': center,
+                'radius': radius,
+                'net_rate': -10.0,
+                'name': f'tumor_region_{i+1}'
+            })
+            break
+
+MULTIPLE_TUMOR_2D = {
+    'name': 'multiple_tumor_2d',
+    'description': '2D diffusion with decay and multiple tumor regions secreting continuously',
+    
+    # NOTE TIME UNITS ARE IN MINUTES
+    'domain_size': (2000.0, 2000.0),
+    'grid_points': (int(2000.0/20), int(2000.0/20)),
+    'dt': 0.01,
+    't_final': 64800,
+    
+    'diffusion_coefficient': float(1e5), # Diffusion coefficient in μm^2/min (typical for oxygen in tissue)
+    'decay_rate': 0.1,
+    
+    'initial_condition': {
+        'type': 'uniform',
+        'value': 38.0
+    },
+    
+    'boundary_condition': {
+        'type': 'dirichlet',
+        'value': 38.0
+    },
+        
+    'bulk': {
+        'regions': tumours
+    },
+    
+    # No analytical solution for this complex scenario
+    'golden_solution': {
+        'type': 'numerical_reference',
+        'schema_class': None, # Will use ImplicitLODBCSchema by default
+        'dx_ref': 10.0, # Finer spatial resolution for reference
+        'dt_ref': 0.0001 # Finer time step for reference
+    },
+    'store_history': False # Don't store history for this one to save memory, since the reference solution is large and we only care about final state
 }
 
 # ==============================================================================
@@ -1064,7 +1170,9 @@ def get_scenario_by_name(name: str) -> Dict[str, Any]:
         'exponential_decay_1d': EXPONENTIAL_DECAY_1D,
         'sine_decay_1d': SINE_DECAY_1D,
         'cosine_diffusion_1d': COSINE_DIFFUSION_1D,
-        'single_tumor_2d': SINGLE_TUMOR_2D
+        'cosine_diffusion_2d': COSINE_DIFFUSION_2D,
+        'single_tumor_2d': SINGLE_TUMOR_2D,
+        'multiple_tumor_2d': MULTIPLE_TUMOR_2D
     }
     
     if name not in scenarios:

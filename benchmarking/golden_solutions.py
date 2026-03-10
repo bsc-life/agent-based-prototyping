@@ -130,7 +130,8 @@ def create_numerical_reference(
     # dx_refinement_factor: int = 10,
     # dt_refinement_factor: int = 10,
     dx_ref: float = 1e-3,
-    dt_ref: float = 1e-3
+    dt_ref: float = 1e-3,
+    store_history: bool = True
     ) -> NumericalReferenceSolution:
     
     # Extract parameters
@@ -197,7 +198,7 @@ def create_numerical_reference(
 
     # print(f"Running {schema.__class__.__name__} high-resolution reference simulation with dx={dx_ref}, dt={dt_ref} for t_final={t_final}...")
     # Run simulation to t_final AND capture the history list
-    history_list = schema.solve(t_final, store_history=True)
+    history_list = schema.solve(t_final, store_history=store_history)
     
     # Convert the list of arrays into a single stacked numpy array
     history_array = np.stack(history_list)
@@ -233,7 +234,8 @@ def create_numerical_reference_cached(
     scenario_params: Dict[str, Any],
     dx_ref: float = 1e-3,
     dt_ref: float = 1e-3,
-    cache_dir: str = 'benchmark_results/.golden_cache'
+    cache_dir: str = 'benchmark_results/.golden_cache',
+    store_history: bool = True
 ) -> NumericalReferenceSolution:
     """
     Same as create_numerical_reference, but caches the result to disk.
@@ -248,6 +250,7 @@ def create_numerical_reference_cached(
     # Build a deterministic hash from every parameter that affects the result
     cache_key_data = {
         'schema_class': schema_class.__name__,
+        # 'schema_class': 'ADIBCSchema',
         'dx_ref': dx_ref,
         'dt_ref': dt_ref,
         'domain_size': scenario_params.get('domain_size'),
@@ -260,6 +263,7 @@ def create_numerical_reference_cached(
         'boundary_condition': str(scenario_params.get('boundary_condition')),
         'bulk': str(scenario_params.get('bulk')),
         'agents': str(scenario_params.get('agents')),
+        'store_history': store_history
     }
     cache_hash = hashlib.sha256(
         json.dumps(cache_key_data, sort_keys=True, default=str).encode()
@@ -282,7 +286,8 @@ def create_numerical_reference_cached(
         schema_class=schema_class,
         scenario_params=scenario_params,
         dx_ref=dx_ref,
-        dt_ref=dt_ref
+        dt_ref=dt_ref,
+        store_history=store_history
     )
 
     reference.save(str(cache_path))
@@ -740,7 +745,7 @@ class SineDecay1D(GoldenSolution):
     def get_description(self) -> str:
         return f"1D Sine decay (D={self.D}, k={self.k})"
 
-def create_golden_solution_from_dict(spec: Dict[str, Any]) -> GoldenSolution:
+def create_golden_solution_from_dict(spec: Dict[str, Any], store_history: bool = True) -> GoldenSolution:
     """
     Factory function to create GoldenSolution from dictionary specification.
     
@@ -839,14 +844,15 @@ def create_golden_solution_from_dict(spec: Dict[str, Any]) -> GoldenSolution:
             )
         else:
             # Need to build it
-            from diffusion_schemas.methods_BC import ADIBCSchema # default reference schema class if not specified
-            return create_numerical_reference(
-                schema_class=spec.get('schema_class') or ADIBCSchema, # returns left operand if not None, otherwise the right operand
+            from diffusion_schemas.methods_BC import ImplicitLODBCSchema # default reference schema class if not specified
+            return create_numerical_reference_cached(
+                schema_class=spec.get('schema_class') or ImplicitLODBCSchema, # returns left operand if not None, otherwise the right operand
                 scenario_params=spec['scenario_params'],
                 # dx_refinement_factor=spec.get('dx_refinement_factor', 10),
                 # dt_refinement_factor=spec.get('dt_refinement_factor', 10)
                 dx_ref=spec.get('dx_ref', 1e-3),
-                dt_ref=spec.get('dt_ref', 1e-3)
+                dt_ref=spec.get('dt_ref', 1e-3),
+                store_history=store_history
             )
 
     else:

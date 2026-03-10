@@ -119,7 +119,7 @@ class CrankNicolsonBCSchema(Schema):
         Ix = eye(Nx, format='csr')
         Iy = eye(Ny, format='csr')
         
-        L = kron(Lx, Iy) + kron(Ix, Ly)
+        L = kron(Lx, Iy) + kron(Ix, Ly) # Dimensions of L: (Nx*Ny, Nx*Ny)
         
         # Identity matrix
         I = eye(Nx * Ny, format='csr')

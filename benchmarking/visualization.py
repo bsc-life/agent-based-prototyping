@@ -384,7 +384,7 @@ def plot_time_evolution(history: List[np.ndarray],
             if hasattr(golden_solution, 'evaluate'):
                 analytical = golden_solution.evaluate(coordinates, t)
             else:
-                analytical = golden_solution(coordinates, t)
+                analytical = golden_solution(*coordinates, t)
             
             axes[i].plot(x, numerical, 'b-', label='Numerical', linewidth=2)
             axes[i].plot(x, analytical, 'r--', label='Analytical', linewidth=2)
@@ -734,3 +734,174 @@ def plot_method_comparison(scenario_name, schema_dict, output_path):
 
         return fig
 
+def plot_scenario(scenario: dict):
+    """
+    Visualize the scenario setup: domain, initial condition, agent/bulk positions.
+    Only uses scenario dict (no simulation). Handles 1D, 2D, 3D.
+    """
+    import matplotlib.patches as mpatches
+
+    # --- Extract domain and grid ---
+    domain_size = scenario['domain_size']
+    grid_points = scenario['grid_points']
+    ic_spec = scenario['initial_condition']
+    agents = scenario.get('agents', None)
+    bulk = scenario.get('bulk', None)
+    name = scenario.get('name', '')
+    desc = scenario.get('description', '')
+
+    # Normalize domain/grid to tuple
+    if isinstance(domain_size, (int, float)):
+        domain_size = (float(domain_size),)
+    if isinstance(grid_points, (int, float)):
+        grid_points = (int(grid_points),)
+    ndim = len(domain_size)
+
+    # Build grid
+    axes = []
+    for L, N in zip(domain_size, grid_points):
+        axes.append(np.linspace(0, L, int(N)))
+    mesh = np.meshgrid(*axes, indexing='ij')
+
+    # Build initial condition (if possible)
+    ic_func = None
+    if isinstance(ic_spec, dict):
+        ic_type = ic_spec.get('type', None)
+        if ic_type == 'uniform':
+            ic_func = lambda *args: np.full_like(args[0], ic_spec.get('value', 0.0), dtype=float)
+        elif ic_type == 'gaussian':
+            center = ic_spec.get('center', tuple(0.5 * np.array(domain_size)))
+            amp = ic_spec.get('amplitude', 1.0)
+            width = ic_spec.get('width', 0.1)
+            def ic_func(*args):
+                r2 = sum((np.asarray(a) - c) ** 2 for a, c in zip(args, np.atleast_1d(center)))
+                return amp * np.exp(-r2 / (2 * width ** 2))
+        elif ic_type == 'step_function':
+            pos = ic_spec.get('position', 0.5)
+            vL = ic_spec.get('value_left', 1.0)
+            vR = ic_spec.get('value_right', 0.0)
+            axis = ic_spec.get('axis', 0)
+            def ic_func(*args):
+                arr = np.where(args[axis] < pos, vL, vR)
+                return arr
+        elif ic_type == 'sine':
+            w = ic_spec.get('wavenumber', 1.0)
+            amp = ic_spec.get('amplitude', 1.0)
+            def ic_func(*args):
+                return amp * np.sin(w * args[0] * np.pi)
+        else:
+            ic_func = None
+    elif callable(ic_spec):
+        ic_func = ic_spec
+    else:
+        ic_func = None
+
+    # Evaluate initial condition
+    ic_vals = None
+    if ic_func is not None:
+        try:
+            ic_vals = ic_func(*mesh)
+        except Exception:
+            ic_vals = None
+
+    # --- Plotting ---
+    # fig = plt.figure(figsize=(7 if ndim==1 else 8, 5 if ndim==1 else 7))
+    fig = plt.figure(figsize=(5,5))
+    border_lw = 1.0  # Tunable border linewidth
+    if ndim == 1:
+        ax = fig.add_subplot(1, 1, 1)
+        x = axes[0]
+        if ic_vals is not None:
+            ax.plot(x, ic_vals, label='Initial condition', color='C0')
+        # Agents
+        if agents:
+            for ag in agents:
+                pos = ag.get('position', ag.get('center', None))
+                if pos is not None:
+                    xpos = pos[0] if isinstance(pos, (list, tuple)) else pos
+                    ax.axvline(xpos, color='C3', linestyle='--', label='Agent', linewidth=border_lw)
+                    # Mark agent with a black border (vertical line)
+                    ax.axvline(xpos, color='k', linestyle='-', linewidth=border_lw/2)
+        # Bulk regions
+        if bulk and 'regions' in bulk:
+            for reg in bulk['regions']:
+                if reg.get('type') == 'sphere':
+                    c = reg['center'][0] if isinstance(reg['center'], (list, tuple)) else reg['center']
+                    r = reg['radius']
+                    ax.axvspan(c - r, c + r, color='C2', alpha=0.2, label='Bulk region')
+                    # Draw black border for bulk region
+                    ax.plot([c - r, c - r], ax.get_ylim(), color='k', linewidth=border_lw/2, linestyle='-')
+                    ax.plot([c + r, c + r], ax.get_ylim(), color='k', linewidth=border_lw/2, linestyle='-')
+        ax.set_xlabel('x')
+        ax.set_ylabel('Concentration')
+        ax.set_title(f"{desc}")
+        plt.suptitle(f"{name}")
+        ax.legend(loc='best')
+        ax.grid(True, alpha=0.3)
+    elif ndim == 2:
+        ax = fig.add_subplot(1, 1, 1)
+        x, y = mesh
+        if ic_vals is not None:
+            im = ax.pcolormesh(x, y, ic_vals, shading='auto', cmap='viridis')
+            plt.colorbar(im, ax=ax, label='Initial concentration')
+        # Agents
+        if agents:
+            for ag in agents:
+                pos = ag.get('position', ag.get('center', None))
+                if pos is not None:
+                    # Agent marker with black edge
+                    ax.plot(pos[0], pos[1], 'ro', markersize=7, label='Agent', markeredgecolor='k', markeredgewidth=border_lw)
+        # Bulk regions
+        if bulk and 'regions' in bulk:
+            for reg in bulk['regions']:
+                if reg.get('type') == 'sphere':
+                    circ = mpatches.Circle(reg['center'], reg['radius'], color='C2', alpha=1, label='Bulk region', ec='k', lw=border_lw)
+                    ax.add_patch(circ)
+        ax.set_xlabel('x')
+        ax.set_ylabel('y')
+        ax.set_title(f"{desc}")
+        plt.suptitle(f"{name}")
+        # Avoid duplicate legend entries
+        handles, labels = ax.get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+        ax.legend(by_label.values(), by_label.keys(), loc='best')
+        ax.set_aspect('equal')
+    elif ndim == 3:
+        ax = fig.add_subplot(1, 1, 1, projection='3d')
+        x, y, z = mesh
+        # Plot a scatter of initial condition (center slice)
+        if ic_vals is not None:
+            idx = ic_vals.shape[2] // 2
+            xs = x[:, :, idx].flatten()
+            ys = y[:, :, idx].flatten()
+            zs = z[:, :, idx].flatten()
+            vals = ic_vals[:, :, idx].flatten()
+            p = ax.scatter(xs, ys, zs, c=vals, cmap='viridis', marker='o', s=10)
+            fig.colorbar(p, ax=ax, label='Initial concentration')
+        # Agents
+        if agents:
+            for ag in agents:
+                pos = ag.get('position', ag.get('center', None))
+                if pos is not None:
+                    ax.scatter(*pos, color='r', s=40, label='Agent', edgecolor='k', linewidth=border_lw)
+        # Bulk regions (spheres only)
+        if bulk and 'regions' in bulk:
+            for reg in bulk['regions']:
+                if reg.get('type') == 'sphere':
+                    # Draw sphere wireframe (approximate)
+                    u, v = np.mgrid[0:2*np.pi:20j, 0:np.pi:10j]
+                    cx, cy, cz = reg['center']
+                    r = reg['radius']
+                    xs = cx + r * np.cos(u) * np.sin(v)
+                    ys = cy + r * np.sin(u) * np.sin(v)
+                    zs = cz + r * np.cos(v)
+                    ax.plot_wireframe(xs, ys, zs, color='C2', alpha=0.2, linewidth=border_lw)
+                    # Draw black border for sphere (approximate, just one circle)
+                    ax.plot(xs[0], ys[0], zs[0], color='k', linewidth=border_lw/2)
+        ax.set_xlabel('x')
+        ax.set_ylabel('y')
+        ax.set_zlabel('z')
+        ax.set_title(f"{desc}")
+        plt.suptitle(f"{name}")    
+    plt.tight_layout()
+    return fig

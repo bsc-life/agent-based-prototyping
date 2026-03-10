@@ -66,13 +66,7 @@ from benchmarking.scenarios import (
     build_scenario_components,
     GAUSSIAN_PULSE_1D,
     GAUSSIAN_PULSE_2D,
-    GAUSSIAN_PULSE_3D,
-    STEP_FUNCTION_1D,
-    STEP_FUNCTION_2D,
-    STEADY_STATE_AGENT_1D,
-    STEADY_STATE_AGENT_2D,
-    EXPONENTIAL_DECAY_1D,
-    SINE_DECAY_1D
+    GAUSSIAN_PULSE_3D
 )
 
 # Analytical solutions
@@ -108,7 +102,8 @@ from benchmarking.visualization import (
     plot_error_distribution,
     plot_time_evolution,
     plot_error_vs_time,
-    plot_convergence_analysis
+    plot_convergence_analysis,
+    plot_scenario
 )
 
 # Public API
@@ -161,6 +156,7 @@ __all__ = [
     'plot_time_evolution',
     'plot_error_vs_time',
     'plot_convergence_analysis',
+    'plot_scenario'
 ]
 
 __version__ = '1.0.0'

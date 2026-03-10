@@ -1,7 +1,7 @@
 """
 Implicit Euler with Alternating Direction Implicit (ADI) method.
 
-This module implements the ADI splitting scheme. It reduces multidimensional
+This module implements the LOD splitting scheme. It reduces multidimensional
 problems into a sequence of efficient 1D tridiagonal solves while maintaining
 unconditional stability.
 """
@@ -13,7 +13,7 @@ from diffusion_schemas.base import Schema
 from diffusion_schemas.utils.boundary import DirichletBC, NeumannBC
 
 
-class ADIBCSchema(Schema):
+class ImplicitLODBCSchema(Schema):
     """
     Alternating Direction Implicit (ADI) method for the diffusion equation.
     
@@ -54,7 +54,7 @@ class ADIBCSchema(Schema):
         diffusion_coefficient=1.0,
         decay_rate=0.0
     ):
-        """Initialize the ADI schema."""
+        """Initialize the LOD schema."""
         super().__init__(domain_size, grid_points, dt, diffusion_coefficient, decay_rate)
         
         # Build the system matrices (Ax, Ay, Az)
@@ -64,7 +64,7 @@ class ADIBCSchema(Schema):
     def _build_system_matrix(self) -> None:
         """Build the sparse system matrices for the implicit scheme."""
         if self.ndim == 1:
-            # For 1D, ADI is just standard Implicit Euler
+            # For 1D, LOD is just standard Implicit Euler
             self.system_matrix = self._build_matrix_1d()
         elif self.ndim == 2:
             self.system_matrix = self._build_matrix_2d()
@@ -131,7 +131,7 @@ class ADIBCSchema(Schema):
         return Ax, Ay, Az
 
     def step(self) -> None:
-        """Perform one ADI time step with integrated BCs."""
+        """Perform one LOD time step with integrated BCs."""
         # Calculate source
         source = self._compute_source_term()
         

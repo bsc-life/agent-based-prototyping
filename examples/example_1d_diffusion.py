@@ -7,8 +7,9 @@ using the explicit Euler method.
 
 import numpy as np
 import matplotlib.pyplot as plt
-from diffusion_schemas import ExplicitEulerSchema
-from diffusion_schemas.utils import gaussian, DirichletBC
+from diffusion_schemas import ExplicitEulerBCSchema, ExplicitEulerSchema, ImplicitEulerBCSchema, ImplicitEulerSchema
+from diffusion_schemas.utils import gaussian, DirichletBC, NeumannBC
+import time
 
 
 def main():
@@ -16,7 +17,7 @@ def main():
     L = 1.0  # Domain length
     N = 100  # Number of grid points
     D = 0.1  # Diffusion coefficient
-    dt = 0.0001  # Time step
+    dt = 0.000001  # Time step
     t_final = 0.1  # Final time
     
     print("=" * 60)
@@ -34,23 +35,29 @@ def main():
         domain_size=L,
         grid_points=N,
         dt=dt,
-        diffusion_coefficient=D
+        diffusion_coefficient=D,
+        spatial_discretization='backward_1'
     )
     
     # Set initial condition: Gaussian centered at x=0.5
-    ic = gaussian(center=0.5, amplitude=1.0, width=0.05)
+    ic = gaussian(center=0.33, amplitude=1.0, width=0.05)
     schema.set_initial_condition(ic)
     
     # Store initial state
     u_initial = schema.get_state()
     
+    # Set boundary conditions (Neumann: zero flux at boundaries)
+    schema.set_boundary_conditions(NeumannBC(flux=0.0))
     # Set boundary conditions (Dirichlet: u=0 at boundaries)
-    schema.set_boundary_conditions(DirichletBC(value=0.0))
+    # schema.set_boundary_conditions(DirichletBC(value=0.0))
     
     # Solve
+    start = time.time()
     print(f"\nSolving from t=0 to t={t_final}...")
     history = schema.solve(t_final=t_final, store_history=True)
     print(f"Completed {len(history)} time steps")
+    end = time.time()
+    print(f"Time taken: {end - start:.3f} seconds")
     
     # Get final state
     u_final = schema.get_state()
@@ -92,8 +99,8 @@ def main():
     cbar.set_label('Time')
     
     plt.tight_layout()
-    plt.savefig('example_1d_diffusion.png', dpi=150, bbox_inches='tight')
-    print(f"\nPlot saved as 'example_1d_diffusion.png'")
+    # plt.savefig('example_1d_diffusion.png', dpi=150, bbox_inches='tight')
+    # print(f"\nPlot saved as 'example_1d_diffusion.png'")
     plt.show()
     
     # Print some statistics

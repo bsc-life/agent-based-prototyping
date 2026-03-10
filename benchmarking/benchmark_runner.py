@@ -160,7 +160,7 @@ class BenchmarkRunner:
         """Run a single schema-scenario benchmark."""
         
         # Build scenario components
-        built_scenario = build_scenario_components(scenario)
+        built_scenario = build_scenario_components(scenario, store_history=store_history)
         
         # Initialize schema
         schema = schema_class(
@@ -222,7 +222,7 @@ class BenchmarkRunner:
             if hasattr(golden_solution, 'evaluate'):
                 analytical_final = golden_solution.evaluate(coordinates, scenario['t_final'])
             else:
-                analytical_final = golden_solution(coordinates, scenario['t_final'])
+                analytical_final = golden_solution(*coordinates, scenario['t_final'])
             
             # Compute errors
             errors = compute_all_errors(
@@ -303,7 +303,7 @@ class BenchmarkRunner:
             if hasattr(golden_solution, 'evaluate'):
                 analytical = golden_solution.evaluate(coordinates, t)
             else:
-                analytical = golden_solution(coordinates, t)
+                analytical = golden_solution(*coordinates, t)
             
             # Compute errors
             l2_err = compute_l2_error(state, analytical, dx)
