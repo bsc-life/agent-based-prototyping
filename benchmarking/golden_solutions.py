@@ -14,6 +14,8 @@ from abc import ABC, abstractmethod
 from typing import Callable, List, Tuple, Union, Dict, Any
 from scipy.interpolate import RegularGridInterpolator # For complex solutions that require numerical golden solution
 
+from diffusion_schemas import Schema
+
 
 class GoldenSolution(ABC):
     """Base class for analytical solutions."""
@@ -63,8 +65,7 @@ class NumericalReferenceSolution(GoldenSolution):
         self.interpolator = RegularGridInterpolator(
             points=interpolator_points, # list of high-resolution 1D-arrays [time_array, x_array, y_array, ...]
             values=reference_history_array, # actual high-resolution data cube, at each time step for each point
-            bounds_error=False,
-            fill_value=None 
+            bounds_error=True
         )
 
     def evaluate(self, coordinates: Union[np.ndarray, Tuple[np.ndarray, ...]], t: float) -> np.ndarray:
@@ -100,8 +101,8 @@ class NumericalReferenceSolution(GoldenSolution):
 
     def save(self, filepath: str):
         """Save the golden solution to a compressed .npz file on disk."""
-        filepath = Path(filepath)
-        filepath.parent.mkdir(parents=True, exist_ok=True)
+        path = Path(filepath)
+        path.parent.mkdir(parents=True, exist_ok=True)
         save_dict = {
             'history': self.interpolator.values,
             'time': self.time_array,
@@ -109,8 +110,8 @@ class NumericalReferenceSolution(GoldenSolution):
         }
         for i, ax in enumerate(self.spatial_coords):
             save_dict[f'spatial_axis_{i}'] = np.asarray(ax)
-        np.savez_compressed(str(filepath), **save_dict)
-        print(f"Golden solution saved to {filepath}")
+        np.savez_compressed(str(path), **save_dict)
+        print(f"Golden solution saved to {path}")
 
     @classmethod
     def load(cls, filepath: str) -> 'NumericalReferenceSolution':
@@ -125,7 +126,7 @@ class NumericalReferenceSolution(GoldenSolution):
         )
 
 def create_numerical_reference(
-    schema_class,
+    schema_class : Schema.__class__,
     scenario_params: Dict[str, Any],
     # dx_refinement_factor: int = 10,
     # dt_refinement_factor: int = 10,
@@ -136,8 +137,8 @@ def create_numerical_reference(
     
     # Extract parameters
     domain_size = scenario_params['domain_size']
-    base_grid_points = scenario_params['grid_points']
-    base_dt = scenario_params['dt']
+    # base_grid_points = scenario_params['grid_points']
+    # base_dt = scenario_params['dt']
     t_final = scenario_params['t_final']
     
     # Determine dimensionality
@@ -198,13 +199,10 @@ def create_numerical_reference(
 
     # print(f"Running {schema.__class__.__name__} high-resolution reference simulation with dx={dx_ref}, dt={dt_ref} for t_final={t_final}...")
     # Run simulation to t_final AND capture the history list
-    history_list = schema.solve(t_final, store_history=store_history)
+    history_list, time_array = schema.solve(t_final, store_history=store_history)
     
     # Convert the list of arrays into a single stacked numpy array
     history_array = np.stack(history_list)
-    
-    # Build the time array based on how many frames were saved
-    time_array = np.linspace(0, t_final, len(history_list))
     
     # Build coordinate arrays (Updated to match your node-centered Schema base class)
     if ndim == 1:
@@ -221,9 +219,8 @@ def create_numerical_reference(
             np.linspace(0, domain_size[2], refined_grid_points[2])
         ]
 
-    
     return NumericalReferenceSolution(
-        time_array=time_array,
+        time_array=np.array(time_array),
         reference_grid_coords=coords,
         reference_history_array=history_array
     )

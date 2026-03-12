@@ -199,22 +199,14 @@ class BenchmarkRunner:
             dV = None
         
         # Run simulation
-        start_time = time.time()
-        history = schema.solve(scenario['t_final'], store_history=store_history, progress = True)
-        duration = time.time() - start_time
-        
-        # Compute times array if history was stored
-        if store_history and history is not None:
-            n_steps = len(history)
-            times = np.linspace(0, scenario['t_final'], n_steps)
-        else:
-            times = None
+        start_time = time.perf_counter()
+        history, times = schema.solve(scenario['t_final'], store_history=store_history, progress = True)
+        duration = time.perf_counter() - start_time
         
         # Get final state
         final_state = schema.get_state()
         
         if 'golden_solution' in built_scenario and built_scenario['golden_solution'] is not None:
-
             # Evaluate golden solution at final time
             golden_solution = built_scenario['golden_solution']
             coordinates = schema._create_coordinate_grids()
@@ -243,7 +235,7 @@ class BenchmarkRunner:
             'figures': []
         }
         
-        if store_history and history is not None:
+        if store_history:
             result['history'] = history
             result['times'] = times
             

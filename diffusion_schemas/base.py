@@ -11,11 +11,7 @@ import numpy as np
 import warnings
 from diffusion_schemas.utils.agents import CompleteAgent
 
-try:
-    from tqdm import tqdm
-    HAS_TQDM = True
-except ImportError:
-    HAS_TQDM = False
+from tqdm import tqdm
 
 
 class Schema(ABC):
@@ -283,7 +279,7 @@ class Schema(ABC):
         """
         pass
     
-    def solve(self, t_final: float, store_history: bool = False, progress: bool = False) -> Optional[List[np.ndarray]]:
+    def solve(self, t_final: float, store_history: bool = False, progress: bool = False) -> Tuple[List[np.ndarray], List[float]]:
         """
         Solve the diffusion equation up to a final time.
         
@@ -300,26 +296,30 @@ class Schema(ABC):
             
         Returns
         -------
-        Optional[List[np.ndarray]]
-            If store_history is True, returns list of states at each step.
-            Otherwise returns None.
+        Tuple[List[np.ndarray], List[float]]
+            If store_history is True, returns list of states at each step and corresponding times.
+            Otherwise returns list with a single element (final state) and corresponding time.
         """
         if t_final <= self.t:
             raise ValueError(f"t_final ({t_final}) must be greater than current time ({self.t})")
         
-        # history = [] if store_history else None
         history = []
+        times = []
 
         if store_history:
             history.append(self.state.copy())
+            times.append(self.t)
         
-        n_steps = int(np.ceil((t_final - self.t) / self.dt))
         pbar = None
-        if progress and HAS_TQDM:
-            pbar = tqdm(total=n_steps, desc="Solving", unit="step",
-                        dynamic_ncols=True, mininterval=0.5, leave=True)
-        # elif progress and not HAS_TQDM:
-        #     warnings.warn("tqdm not installed: progress bar disabled.")
+        if progress:
+            # Properly calculate number of steps to display in progress bar
+            # accounting for floating point rounding issues
+            n_steps = 0
+            temp_t = self.t
+            while temp_t < t_final:
+                temp_t += self.dt
+                n_steps += 1
+            pbar = tqdm(total=n_steps, desc="Solving", unit="step", dynamic_ncols=True)
 
         while self.t < t_final:
             # Adjust last step to hit t_final exactly if needed
@@ -328,13 +328,6 @@ class Schema(ABC):
                 self.dt = t_final - self.t
 
                 # Solve BC integration into matrices problem
-
-                # if isinstance(self, (ImplicitEulerBCSchema, ImplicitLODBCSchema)):
-                #     self._build_system_matrix()  # Rebuild system matrix with new dt
-                # elif isinstance(self, (CrankNicolsonLODBCSchema, CrankNicolsonBCSchema)):
-                #     self._build_system_matrices()  # Rebuild system matrix with new dt
-                                # Rebuild system matrix if method exists
-
                 if hasattr(self, '_build_system_matrix'):
                     self._build_system_matrix()
                 elif hasattr(self, '_build_system_matrices'):
@@ -347,7 +340,7 @@ class Schema(ABC):
             
             if store_history:
                 history.append(self.state.copy())
-            
+                times.append(self.t)
             # At each step, update the progress bar if enabled
             if pbar is not None:
                 pbar.update(1)
@@ -356,10 +349,12 @@ class Schema(ABC):
         if pbar is not None:
             pbar.close()
 
+        # If history was not stored, return the final state as a single-element list for consistency
         if not store_history:
             history.append(self.state.copy())
+            times.append(self.t)
 
-        return history
+        return history, times
     
     def _compute_source_term(self) -> np.ndarray:
         """
