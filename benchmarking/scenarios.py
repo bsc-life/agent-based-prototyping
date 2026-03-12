@@ -1047,7 +1047,7 @@ SINGLE_TUMOR_2D = {
         'regions': [
             {
                 'type': 'sphere',
-                'center': (0.5, 0.5),
+                'center': (1000, 1000),
                 'radius': 250.0,
                 'net_rate': -10.0, 
                 'name': 'tumor_region'
