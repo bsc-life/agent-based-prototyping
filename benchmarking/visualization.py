@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 from matplotlib import cm
 from pathlib import Path
-from typing import List, Tuple, Union, Dict, Any
+from typing import List, Tuple, Union, Dict, Any, Optional
 import os
 
 
@@ -20,8 +20,8 @@ def plot_final_comparison(numerical: np.ndarray,
                          coordinates: Union[np.ndarray, Tuple[np.ndarray, ...]],
                          schema_name: str,
                          scenario_name: str,
-                         output_path: Union[str, Path] = None,
-                         title: str = None) -> plt.Figure:
+                         output_path: Optional[Union[str, Path]] = None,
+                         title: Optional[str] = None) -> Optional[plt.Figure]:
     """
     Plot side-by-side comparison of numerical and analytical solutions.
     
@@ -193,6 +193,8 @@ def plot_final_comparison(numerical: np.ndarray,
     if output_path:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         fig.savefig(output_path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        return None
     
     return fig
 
@@ -202,8 +204,8 @@ def plot_error_distribution(numerical: np.ndarray,
                            coordinates: Union[np.ndarray, Tuple[np.ndarray, ...]],
                            schema_name: str,
                            scenario_name: str,
-                           output_path: Union[str, Path] = None,
-                           relative: bool = False) -> plt.Figure:
+                           output_path: Optional[Union[str, Path]] = None,
+                           relative: bool = False) -> Optional[plt.Figure]:
     """
     Plot error distribution heatmap/histogram.
     
@@ -311,6 +313,8 @@ def plot_error_distribution(numerical: np.ndarray,
     if output_path:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         fig.savefig(output_path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        return None
     
     return fig
 
@@ -321,8 +325,8 @@ def plot_time_evolution(history: List[np.ndarray],
                        coordinates: Union[np.ndarray, Tuple[np.ndarray, ...]],
                        schema_name: str,
                        scenario_name: str,
-                       output_path: Union[str, Path] = None,
-                       num_snapshots: int = 6) -> plt.Figure:
+                       output_path: Optional[Union[str, Path]] = None,
+                       num_snapshots: int = 6) -> Optional[plt.Figure]:
     """
     Plot time evolution as grid of snapshots.
     
@@ -504,6 +508,8 @@ def plot_time_evolution(history: List[np.ndarray],
     if output_path:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         fig.savefig(output_path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        return None
     
     return fig
 
@@ -512,7 +518,7 @@ def plot_error_vs_time(times: List[float],
                       errors: Dict[str, List[float]],
                       schema_name: str,
                       scenario_name: str,
-                      output_path: Union[str, Path] = None) -> plt.Figure:
+                      output_path: Optional[Union[str, Path]] = None) -> Optional[plt.Figure]:
     """
     Plot error metrics vs time.
     
@@ -568,6 +574,8 @@ def plot_error_vs_time(times: List[float],
     if output_path:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         fig.savefig(output_path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        return None
     
     return fig
 
@@ -577,8 +585,8 @@ def plot_convergence_analysis(refinements: List[float],
                               convergence_rates: Dict[str, float],
                               schema_name: str,
                               scenario_name: str,
-                              output_path: Union[str, Path] = None,
-                              refinement_type: str = 'dt') -> plt.Figure:
+                              output_path: Optional[Union[str, Path]] = None,
+                              refinement_type: str = 'dt') -> Optional[plt.Figure]:
     """
     Plot convergence analysis (error vs refinement parameter).
     
@@ -640,6 +648,8 @@ def plot_convergence_analysis(refinements: List[float],
     if output_path:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         fig.savefig(output_path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        return None
     
     return fig
 
