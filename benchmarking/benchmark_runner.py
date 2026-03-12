@@ -9,7 +9,7 @@ generating visualizations.
 import numpy as np
 import time
 from pathlib import Path
-from typing import Dict, List, Any, Union, Type, Tuple
+from typing import Dict, List, Any, Optional, Union, Type, Tuple
 from collections import defaultdict
 import pandas as pd
 
@@ -51,7 +51,7 @@ class BenchmarkRunner:
         """
         self.scenarios.append(scenario)
     
-    def add_schema(self, schema_class: Type[Schema], name: str = None):
+    def add_schema(self, schema_class: Type[Schema], name: Optional[str] = None):
         """
         Add a schema to test.
         
@@ -122,9 +122,8 @@ class BenchmarkRunner:
                     print(f"  L2 error: {result['errors'].get('l2_relative', 'N/A'):.6e}")
                     print(f"  L∞ error: {result['errors'].get('linf_relative', 'N/A'):.6e}")
         
-        # New: storing final states for each schema for later comparison of single runs
+        # Store final states for each schema for later comparison of single runs
         if generate_plots:
-
             # Group results by scenario
             # Structure: grouped_results['ScenarioName'] = {'SchemaName': result_dict, ...}
             grouped_results = defaultdict(dict)
@@ -134,20 +133,17 @@ class BenchmarkRunner:
             # Loop through scenarios and plot if applicable
             for sc_name, schema_dict in grouped_results.items():
                 # Only compare if we have multiple schemas
-                if len(schema_dict) > 1:
-                    
-                    # Check dimensions using the first available result
-                    first_res = list(schema_dict.values())[0]
-                    final_state = first_res['final_state']
-                
-                    print(f"\nGenerating comparison plot for: {sc_name}")
-                    print("-" * 70)
+                if len(schema_dict) <= 1:
+                    continue
 
-                    fig_path = output_dir / sc_name / "method_comparison.png"
-                    plot_method_comparison(sc_name, schema_dict, fig_path)
-                    
-                    for res in schema_dict.values():
-                        res['figures'].append(str(fig_path))
+                print(f"\nGenerating comparison plot for: {sc_name}")
+                print("-" * 70)
+
+                fig_path = output_dir / sc_name / "method_comparison.png"
+                plot_method_comparison(sc_name, schema_dict, fig_path)
+                
+                for res in schema_dict.values():
+                    res['figures'].append(str(fig_path))
 
         print("\n" + "=" * 70)
         print("Benchmark complete!")

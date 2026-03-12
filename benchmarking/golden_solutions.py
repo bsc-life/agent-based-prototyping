@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 from typing import Callable, List, Tuple, Union, Dict, Any
 from scipy.interpolate import RegularGridInterpolator # For complex solutions that require numerical golden solution
 
-from diffusion_schemas import Schema
+from diffusion_schemas import Schema, ImplicitLODBCSchema
 
 
 class GoldenSolution(ABC):
@@ -244,15 +244,15 @@ def create_numerical_reference_cached(
     Parameters are identical to create_numerical_reference, with the addition
     of *cache_dir* which controls where cached files are stored.
     """
+    if schema_class is None:
+        schema_class = ImplicitLODBCSchema  # Default to Implicit LOD if not specified
+
     # Build a deterministic hash from every parameter that affects the result
     cache_key_data = {
         'schema_class': schema_class.__name__,
-        # 'schema_class': 'ADIBCSchema',
         'dx_ref': dx_ref,
         'dt_ref': dt_ref,
         'domain_size': scenario_params.get('domain_size'),
-        # 'grid_points': scenario_params.get('grid_points'),
-        # 'dt': scenario_params.get('dt'),
         't_final': scenario_params.get('t_final'),
         'diffusion_coefficient': scenario_params.get('diffusion_coefficient'),
         'decay_rate': scenario_params.get('decay_rate'),
@@ -267,7 +267,6 @@ def create_numerical_reference_cached(
     ).hexdigest()[:16]
 
     scenario_name = scenario_params.get('name', 'reference')
-    # cache_path = Path(cache_dir) / f"{scenario_name}_{cache_hash}.npz"
     cache_path = Path(cache_dir) / f"{cache_hash}.npz"
 
     # Try loading from cache
@@ -375,7 +374,7 @@ class GaussianDiffusion2D(GoldenSolution):
         self.sigma0 = initial_width
         self.D = diffusion_coefficient
         
-    def evaluate(self, coordinates: Tuple[np.ndarray, np.ndarray], t: float) -> np.ndarray:
+    def evaluate(self, coordinates: Union[np.ndarray, Tuple[np.ndarray, ...]], t: float) -> np.ndarray:
         """Evaluate 2D Gaussian diffusion solution."""
         x, y = coordinates
         x0, y0 = self.center
@@ -423,7 +422,7 @@ class GaussianDiffusion3D(GoldenSolution):
         self.sigma0 = initial_width
         self.D = diffusion_coefficient
         
-    def evaluate(self, coordinates: Tuple[np.ndarray, np.ndarray, np.ndarray], t: float) -> np.ndarray:
+    def evaluate(self, coordinates: Union[np.ndarray, Tuple[np.ndarray, ...]], t: float) -> np.ndarray:
         """Evaluate 3D Gaussian diffusion solution."""
         x, y, z = coordinates
         x0, y0, z0 = self.center
@@ -584,7 +583,7 @@ class StepFunctionDiffusion1D(GoldenSolution):
         # Result simplifies to: (2 * (val_l - val_r) / nπ) * sin(nπx0/L)
         
         self.coeffs = []
-        self.wave_numbers = [] # k = nπ/L
+        wave_numbers = [] # k = nπ/L
         
         delta_v = self.val_l - self.val_r
         
@@ -601,10 +600,10 @@ class StepFunctionDiffusion1D(GoldenSolution):
             an = (2.0 / self.L) * (delta_v / k) * np.sin(k * self.x0)
             
             self.coeffs.append(an)
-            self.wave_numbers.append(k)
+            wave_numbers.append(k)
             
         self.coeffs = np.array(self.coeffs)
-        self.wave_numbers = np.array(self.wave_numbers)
+        self.wave_numbers = np.array(wave_numbers)
 
     def evaluate(self, coordinates: Union[np.ndarray, Tuple[np.ndarray, ...]], t: float) -> np.ndarray:
         """Evaluate the Fourier series solution at time t."""
@@ -699,7 +698,7 @@ class StepFunctionDiffusion2D(GoldenSolution):
             axis=1
         )
 
-    def evaluate(self, coordinates: Tuple[np.ndarray, np.ndarray], t: float) -> np.ndarray:
+    def evaluate(self, coordinates: Union[np.ndarray, Tuple[np.ndarray, ...]], t: float) -> np.ndarray:
         """
         Evaluate u(x,y,t) = u_x(x,t) * u_y(y,t)
         """
@@ -832,25 +831,13 @@ def create_golden_solution_from_dict(spec: Dict[str, Any], store_history: bool =
         )
 
     elif solution_type == 'numerical_reference':
-       # Check if already built
-        if 'reference_grid_coords' in spec:
-            return NumericalReferenceSolution(
-                reference_grid_coords=spec['reference_grid_coords'],
-                reference_solution_array=spec['reference_solution_array'],
-                t_target=spec['t_target']
-            )
-        else:
-            # Need to build it
-            from diffusion_schemas.methods_BC import ImplicitLODBCSchema # default reference schema class if not specified
-            return create_numerical_reference_cached(
-                schema_class=spec.get('schema_class') or ImplicitLODBCSchema, # returns left operand if not None, otherwise the right operand
-                scenario_params=spec['scenario_params'],
-                # dx_refinement_factor=spec.get('dx_refinement_factor', 10),
-                # dt_refinement_factor=spec.get('dt_refinement_factor', 10)
-                dx_ref=spec.get('dx_ref', 1e-3),
-                dt_ref=spec.get('dt_ref', 1e-3),
-                store_history=store_history
-            )
+        return create_numerical_reference_cached(
+            schema_class=spec.get('schema_class'),
+            scenario_params=spec['scenario_params'],
+            dx_ref=spec.get('dx_ref', 1e-3),
+            dt_ref=spec.get('dt_ref', 1e-3),
+            store_history=store_history
+        )
 
     else:
         raise ValueError(f"Unknown golden solution type: {solution_type}")
