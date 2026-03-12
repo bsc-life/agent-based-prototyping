@@ -316,9 +316,20 @@ class Region:
     def __init__(
         self,
         domain: RegionDomain,
+        name: str = ""
+    ):
+        self.domain = domain
+        self.name = name or f"Region_{id(self)}"
+
+
+class NetRegion(Region):
+    def __init__(
+        self,
+        domain: RegionDomain,
         net_rate: Union[float, Callable] = 0.0,
         name: str = ""
     ):
+        super().__init__(domain, name=name)
         self.domain = domain
         self.net_rate = net_rate
         self.name = name or f"Region_{id(self)}"
@@ -360,7 +371,7 @@ class Region:
     
 class LinearRegion(Region):
     def __init__(self, domain: RegionDomain, linear_rate: float, name: str = ""):
-        super().__init__(domain, net_rate=0.0, name=name)
+        super().__init__(domain, name=name)
         self.linear_rate = linear_rate
 
     def set_linear_rate(self, rate: float) -> None:
@@ -406,6 +417,7 @@ class Bulk:
     """
 
     def __init__(self, regions: Optional[List[Region]] = None):
+        self._precomputed = False
         self._regions: List[Region] = list(regions) if regions else []
 
     # -- region management ------------------------------------------------
@@ -486,37 +498,18 @@ class Bulk:
         np.ndarray
             Source term array, same shape as the coordinate grids.
         """
-        # Determine reference shape
-        ref = coords[0]
-        source = np.zeros_like(ref)
+
+        self._precompute_rates(coords, dx)
+        source = self._net_cached_rates + field * self._linear_cached_rates
 
         for region in self._regions:
-
-            if isinstance(region, LinearRegion):
-                rate = region.get_linear_rate(t)
-                if rate == 0.0:
-                    continue
-                overlap = region.domain.rasterize(coords, dx)
-                source += overlap * rate * field
-
-            elif isinstance(region, TargetRegion):
+            if isinstance(region, TargetRegion):
                 rate = region.get_linear_rate(t)
                 rho_target = region.get_rho_target(t)
                 if rate == 0.0:
                     continue
                 overlap = region.domain.rasterize(coords, dx)
                 source += overlap * rate * (rho_target - field)
-
-            else: # normal Region with fixed net_rate
-                rate = region.get_net_rate(t)
-                if rate == 0.0:
-                    continue
-                # Retrieve overlap mask
-                # 1 = voxel completely inside region
-                # 0 = voxel completely outside region
-                # Take into account proportionality
-                overlap = region.domain.rasterize(coords, dx)
-                source += overlap * rate
 
         # Negative fields problem (revisit this logic)
         # If there exists any negative values
@@ -530,6 +523,26 @@ class Bulk:
         # Rate is already given by unit volume 
 
         return source
+    
+    def _precompute_rates(self, coords, dx) -> None:
+        """
+        Precompute net rates for all regions at the current time step.
+        
+        This can be used to optimize performance if there are many regions
+        with time-dependent rates, by avoiding repeated calls to get_net_rate
+        during source computation.
+        """
+        if self._precomputed:
+            return
+        self._precomputed = True
+
+        self._net_cached_rates = np.zeros_like(coords[0])
+        self._linear_cached_rates = np.zeros_like(coords[0])
+        for region in self._regions:
+            if isinstance(region, LinearRegion):
+                self._linear_cached_rates += region.domain.rasterize(coords, dx) * region.linear_rate
+            elif isinstance(region, NetRegion): 
+                self._net_cached_rates += region.domain.rasterize(coords, dx) * region.net_rate
 
     def __repr__(self) -> str:
         return f"Bulk(n_regions={len(self._regions)})"

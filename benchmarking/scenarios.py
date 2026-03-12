@@ -14,7 +14,7 @@ from diffusion_schemas.utils.boundary import (
     DirichletBC, NeumannBC, PeriodicBC, RobinBC, BoundaryCondition
 )
 from diffusion_schemas.utils.agents import Agent, CompleteAgent
-from diffusion_schemas.utils.bulk import Bulk, Region, LinearRegion, TargetRegion, RectangleRegion, SphereRegion
+from diffusion_schemas.utils.bulk import Bulk, NetRegion, LinearRegion, TargetRegion, RectangleRegion, SphereRegion
 from benchmarking.golden_solutions import (
     GoldenSolution, GaussianDiffusion1D, GaussianDiffusion2D, GaussianDiffusion3D, StepFunctionDiffusion1D,
     create_golden_solution_from_dict,
@@ -283,7 +283,7 @@ def _build_bulk(bulk_spec: Union[Dict[str, Any], Bulk, None]) -> Union[Bulk, Non
                 region = TargetRegion(domain=domain, linear_rate=linear_rate, rho_target=rho_target, name=name)
             else:
                 net_rate = region_spec.get('net_rate', 0.0)
-                region = Region(domain=domain, net_rate=net_rate, name=name)
+                region = NetRegion(domain=domain, net_rate=net_rate, name=name)
             bulk.add_region(region)
     
         return bulk
@@ -1047,7 +1047,7 @@ SINGLE_TUMOR_2D = {
         'regions': [
             {
                 'type': 'sphere',
-                'center': (1000, 1000),
+                'center': (500, 500),
                 'radius': 250.0,
                 'net_rate': -10.0, 
                 'name': 'tumor_region'
@@ -1069,20 +1069,16 @@ SINGLE_TUMOR_2D = {
 np.random.seed(20)  # for reproducibility
 tumours = []
 n = 30
-radius = 10.0
+radius = 100.0
 for i in range(n):
-    while True:
-        center = (np.random.uniform(250, 1750), np.random.uniform(250, 1750))
-        # Check for overlap with existing tumors
-        if all(np.linalg.norm(np.array(center) - np.array(t['center'])) > 2*radius for t in tumours):
-            tumours.append({
-                'type': 'sphere',
-                'center': center,
-                'radius': radius,
-                'net_rate': -10.0,
-                'name': f'tumor_region_{i+1}'
-            })
-            break
+    center = (np.random.uniform(250, 1750), np.random.uniform(250, 1750))
+    tumours.append({
+        'type': 'sphere',
+        'center': center,
+        'radius': radius,
+        'net_rate': -10.0,
+        'name': f'tumor_region_{i+1}'
+    })
 
 MULTIPLE_TUMOR_2D = {
     'name': 'multiple_tumor_2d',
