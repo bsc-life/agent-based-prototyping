@@ -202,25 +202,20 @@ class BenchmarkRunner:
         # Get final state
         final_state = schema.get_state()
         
-        if 'golden_solution' in built_scenario and built_scenario['golden_solution'] is not None:
-            # Evaluate golden solution at final time
-            golden_solution = built_scenario['golden_solution']
-            coordinates = schema._create_coordinate_grids()
-            
-            if hasattr(golden_solution, 'evaluate'):
-                analytical_final = golden_solution.evaluate(coordinates, scenario['t_final'])
-            else:
-                analytical_final = golden_solution(*coordinates, scenario['t_final'])
-            
-            # Compute errors
-            errors = compute_all_errors(
-                final_state, analytical_final, 
-                dx=schema.dx, initial_mass=initial_mass
-            )
+        # Evaluate golden solution at final time
+        golden_solution = built_scenario['golden_solution']
+        coordinates = schema._create_coordinate_grids()
         
+        if hasattr(golden_solution, 'evaluate'):
+            analytical_final = golden_solution.evaluate(coordinates, scenario['t_final'])
         else:
-            analytical_final = None
-            errors = {}
+            analytical_final = golden_solution(*coordinates, scenario['t_final'])
+        
+        # Compute errors
+        errors = compute_all_errors(
+            final_state, analytical_final, 
+            dx=schema.dx, initial_mass=initial_mass
+        )
         
         # Prepare result
         result = {
@@ -307,7 +302,7 @@ class BenchmarkRunner:
     def run_convergence_analysis(self, schema_class: Type[Schema], schema_name: str,
                                  scenario_base: Dict[str, Any],
                                  refinement_type: str = 'dt',
-                                 refinement_factors: List[float] = None,
+                                 refinement_factors: Optional[List[float]] = None,
                                  output_dir: Union[str, Path] = 'convergence_results') -> Dict[str, Any]:
         """
         Run convergence analysis by varying dt or grid spacing.
@@ -363,16 +358,10 @@ class BenchmarkRunner:
             
             if refinement_type == 'dt':
                 scenario['dt'] = refinement
-                h_value = refinement
             else:  # spatial
                 scenario['grid_points'] = refinement
                 # Compute effective dx
                 domain_size = scenario['domain_size']
-                if isinstance(refinement, int):
-                    h_value = domain_size / (refinement - 1)
-                else:
-                    h_value = domain_size[0] / (refinement[0] - 1) 
-                    # h_value = domain_size[0] / (refinement - 1)
             
             print(f"\n  Testing with {refinement_type}={refinement}")
             
