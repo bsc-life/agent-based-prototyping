@@ -322,21 +322,22 @@ class Schema(ABC):
             pbar = tqdm(total=n_steps, desc="Solving", unit="step", dynamic_ncols=True)
 
         while self.t < t_final:
-            # Adjust last step to hit t_final exactly if needed
-            if self.t + self.dt > t_final:
-                old_dt = self.dt
-                self.dt = t_final - self.t
+            # # Adjust last step to hit t_final exactly if needed
+            # if self.t + self.dt > t_final:
+            #     old_dt = self.dt
+            #     self.dt = t_final - self.t
 
-                # Solve BC integration into matrices problem
-                if hasattr(self, '_build_system_matrix'):
-                    self._build_system_matrix()
-                elif hasattr(self, '_build_system_matrices'):
-                    self._build_system_matrices()
+            #     # Solve BC integration into matrices problem
+            #     if hasattr(self, '_build_system_matrix'):
+            #         self._build_system_matrix()
+            #     elif hasattr(self, '_build_system_matrices'):
+            #         self._build_system_matrices()
 
-                self.step()
-                self.dt = old_dt
-            else:
-                self.step()
+            #     self.step()
+            #     self.dt = old_dt
+            # else:
+            #     self.step()
+            self.step()
             
             if store_history:
                 history.append(self.state.copy())
