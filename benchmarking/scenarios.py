@@ -1061,28 +1061,11 @@ SINGLE_TUMOR_2D = {
         'schema_class': None, # Will use ImplicitLODBCSchema by default
         'dx_ref': 10.0, # Finer spatial resolution for reference
         'dt_ref': 0.0001
+        # Maybe storing here store_history?
     },
 
     'store_history': False # Don't store history for this one to save memory, since the reference solution is large and we only care about final state
 }
-
-np.random.seed(20)  # for reproducibility
-tumours = []
-n = 30
-radius = 10.0
-for i in range(n):
-    while True:
-        center = (np.random.uniform(250, 1750), np.random.uniform(250, 1750))
-        # Check for overlap with existing tumors
-        if all(np.linalg.norm(np.array(center) - np.array(t['center'])) > 2*radius for t in tumours):
-            tumours.append({
-                'type': 'sphere',
-                'center': center,
-                'radius': radius,
-                'net_rate': -10.0,
-                'name': f'tumor_region_{i+1}'
-            })
-            break
 
 MULTIPLE_TUMOR_2D = {
     'name': 'multiple_tumor_2d',
@@ -1108,7 +1091,7 @@ MULTIPLE_TUMOR_2D = {
     },
         
     'bulk': {
-        'regions': tumours
+        'regions': None
     },
     
     # No analytical solution for this complex scenario

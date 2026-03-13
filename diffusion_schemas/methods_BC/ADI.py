@@ -74,6 +74,7 @@ class ADIBCSchema(Schema):
             Lx[-1, -1], Lx[-1, -2] = -2 / (dx**2), 2 / (dx**2)
 
         Lx, Ix = Lx.tocsr(), Ix.tocsr()
+        # Note decay term appears twice at each step, thus why it is previously divided by 4
         LHS_x = (Ix - dt_half * self.diffusion_coefficient * Lx + decay_term * Ix).tolil()
         RHS_x = (Ix + dt_half * self.diffusion_coefficient * Lx - decay_term * Ix).tolil()
 
