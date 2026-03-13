@@ -9,7 +9,7 @@ generating visualizations.
 import numpy as np
 import time
 from pathlib import Path
-from typing import Dict, List, Any, Union, Type, Tuple
+from typing import Dict, List, Any, Optional, Union, Type, Tuple
 from collections import defaultdict
 import pandas as pd
 
@@ -51,7 +51,7 @@ class BenchmarkRunner:
         """
         self.scenarios.append(scenario)
     
-    def add_schema(self, schema_class: Type[Schema], name: str = None):
+    def add_schema(self, schema_class: Type[Schema], name: Optional[str] = None):
         """
         Add a schema to test.
         
@@ -122,9 +122,8 @@ class BenchmarkRunner:
                     print(f"  L2 error: {result['errors'].get('l2_relative', 'N/A'):.6e}")
                     print(f"  L∞ error: {result['errors'].get('linf_relative', 'N/A'):.6e}")
         
-        # New: storing final states for each schema for later comparison of single runs
+        # Store final states for each schema for later comparison of single runs
         if generate_plots:
-
             # Group results by scenario
             # Structure: grouped_results['ScenarioName'] = {'SchemaName': result_dict, ...}
             grouped_results = defaultdict(dict)
@@ -134,20 +133,17 @@ class BenchmarkRunner:
             # Loop through scenarios and plot if applicable
             for sc_name, schema_dict in grouped_results.items():
                 # Only compare if we have multiple schemas
-                if len(schema_dict) > 1:
-                    
-                    # Check dimensions using the first available result
-                    first_res = list(schema_dict.values())[0]
-                    final_state = first_res['final_state']
-                
-                    print(f"\nGenerating comparison plot for: {sc_name}")
-                    print("-" * 70)
+                if len(schema_dict) <= 1:
+                    continue
 
-                    fig_path = output_dir / sc_name / "method_comparison.png"
-                    plot_method_comparison(sc_name, schema_dict, fig_path)
-                    
-                    for res in schema_dict.values():
-                        res['figures'].append(str(fig_path))
+                print(f"\nGenerating comparison plot for: {sc_name}")
+                print("-" * 70)
+
+                fig_path = output_dir / sc_name / "method_comparison.png"
+                plot_method_comparison(sc_name, schema_dict, fig_path)
+                
+                for res in schema_dict.values():
+                    res['figures'].append(str(fig_path))
 
         print("\n" + "=" * 70)
         print("Benchmark complete!")
@@ -199,40 +195,27 @@ class BenchmarkRunner:
             dV = None
         
         # Run simulation
-        start_time = time.time()
-        history = schema.solve(scenario['t_final'], store_history=store_history, progress = True)
-        duration = time.time() - start_time
-        
-        # Compute times array if history was stored
-        if store_history and history is not None:
-            n_steps = len(history)
-            times = np.linspace(0, scenario['t_final'], n_steps)
-        else:
-            times = None
+        start_time = time.perf_counter()
+        history, times = schema.solve(scenario['t_final'], store_history=store_history, progress = True)
+        duration = time.perf_counter() - start_time
         
         # Get final state
         final_state = schema.get_state()
         
-        if 'golden_solution' in built_scenario and built_scenario['golden_solution'] is not None:
-
-            # Evaluate golden solution at final time
-            golden_solution = built_scenario['golden_solution']
-            coordinates = schema._create_coordinate_grids()
-            
-            if hasattr(golden_solution, 'evaluate'):
-                analytical_final = golden_solution.evaluate(coordinates, scenario['t_final'])
-            else:
-                analytical_final = golden_solution(*coordinates, scenario['t_final'])
-            
-            # Compute errors
-            errors = compute_all_errors(
-                final_state, analytical_final, 
-                dx=schema.dx, initial_mass=initial_mass
-            )
+        # Evaluate golden solution at final time
+        golden_solution = built_scenario['golden_solution']
+        coordinates = schema._create_coordinate_grids()
         
+        if hasattr(golden_solution, 'evaluate'):
+            analytical_final = golden_solution.evaluate(coordinates, scenario['t_final'])
         else:
-            analytical_final = None
-            errors = {}
+            analytical_final = golden_solution(*coordinates, scenario['t_final'])
+        
+        # Compute errors
+        errors = compute_all_errors(
+            final_state, analytical_final, 
+            dx=schema.dx, initial_mass=initial_mass
+        )
         
         # Prepare result
         result = {
@@ -243,7 +226,7 @@ class BenchmarkRunner:
             'figures': []
         }
         
-        if store_history and history is not None:
+        if store_history:
             result['history'] = history
             result['times'] = times
             
@@ -319,7 +302,7 @@ class BenchmarkRunner:
     def run_convergence_analysis(self, schema_class: Type[Schema], schema_name: str,
                                  scenario_base: Dict[str, Any],
                                  refinement_type: str = 'dt',
-                                 refinement_factors: List[float] = None,
+                                 refinement_factors: Optional[List[float]] = None,
                                  output_dir: Union[str, Path] = 'convergence_results') -> Dict[str, Any]:
         """
         Run convergence analysis by varying dt or grid spacing.
@@ -375,16 +358,10 @@ class BenchmarkRunner:
             
             if refinement_type == 'dt':
                 scenario['dt'] = refinement
-                h_value = refinement
             else:  # spatial
                 scenario['grid_points'] = refinement
                 # Compute effective dx
                 domain_size = scenario['domain_size']
-                if isinstance(refinement, int):
-                    h_value = domain_size / (refinement - 1)
-                else:
-                    h_value = domain_size[0] / (refinement[0] - 1) 
-                    # h_value = domain_size[0] / (refinement - 1)
             
             print(f"\n  Testing with {refinement_type}={refinement}")
             

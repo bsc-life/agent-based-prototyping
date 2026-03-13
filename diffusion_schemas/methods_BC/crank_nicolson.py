@@ -195,21 +195,16 @@ class CrankNicolsonBCSchema(Schema):
         rhs = rhs.flatten()
 
         # --- IMPLICIT PART (LHS Construction & Solve) ---
-        # Copy matrix in LIL format for efficient BC modification
-        A_system = self.A_impl.copy().tolil()
 
         # Apply boundary conditions
         if self._boundary_conditions is not None:
             if isinstance(self._boundary_conditions, DirichletBC):
-                rhs = self._apply_dirichlet_bc(A_system, rhs)
+                rhs = self._apply_dirichlet_bc(rhs)
             elif isinstance(self._boundary_conditions, NeumannBC):
-                rhs = self._apply_neumann_bc(A_system, rhs)
-        
-        # Convert back to CSR for efficient solving
-        A_system = A_system.tocsr()
+                rhs = self._apply_neumann_bc(rhs)
 
         # Solve the linear system
-        u_new_flat = spsolve(A_system, rhs)
+        u_new_flat = spsolve(self.A_impl, rhs)
         
         # Reshape to grid
         self.state = u_new_flat.reshape(self.grid_points)
@@ -220,8 +215,8 @@ class CrankNicolsonBCSchema(Schema):
     # =========================================================================
     # IMPLICIT BC LOGIC (From ImplicitEulerBCSchema)
     # =========================================================================
-    def _apply_neumann_bc(self, matrix, rhs):
-        """Apply Neumann BC to LHS matrix and RHS vector."""
+    def _apply_neumann_bc(self, rhs):
+        """Apply Neumann BC to RHS vector."""
         flux = self._boundary_conditions._get_flux(self.t + self.dt)
         D = self.diffusion_coefficient
         dt = self.dt
@@ -230,44 +225,35 @@ class CrankNicolsonBCSchema(Schema):
         # Common calculation for forcing term (matches Implicit logic adjusted for theta)
         # Note: Implicit had forcing = (2*dt*D*flux)/dx. Here we scale by theta.
         def get_forcing(h): return (2 * theta * dt * D * flux) / h
-        def get_alpha(h): return (theta * dt * D) / (h**2)
 
         if self.ndim == 1:
             N, dx = self.grid_points[0], self.dx[0]
             forcing = get_forcing(dx)
-            alpha = get_alpha(dx)
             
             # Left (i=0): Neighbor (i=1) weight doubles (subtract 2*alpha from existing)
             # Existing was -alpha, we want -2alpha, so subtract alpha more.
             # But simpler: just overwrite/add. Implicit used: matrix[0,1] -= alpha (or = -2alpha)
             # Since matrix is (I - ...), off-diagonals are -theta*dt*D/h^2 = -alpha.
             # We set it to -2*alpha.
-            matrix[0, 1] = -2 * alpha
             rhs[0] -= forcing
             
             # Right (i=N-1)
-            matrix[-1, -2] = -2 * alpha
             rhs[-1] += forcing
 
         elif self.ndim == 2:
             Nx, Ny = self.grid_points
             dx, dy = self.dx
-            alpha_x, alpha_y = get_alpha(dx), get_alpha(dy)
             fx, fy = get_forcing(dx), get_forcing(dy)
 
             # Left/Right (Stride Ny)
             idx_l = np.arange(Ny)
             idx_r = np.arange((Nx - 1) * Ny, Nx * Ny)
-            matrix[idx_l, idx_l + Ny] = -2 * alpha_x
-            matrix[idx_r, idx_r - Ny] = -2 * alpha_x
             rhs[idx_l] -= fx
             rhs[idx_r] += fx
 
             # Bottom/Top (Stride 1)
             idx_b = np.arange(0, Nx * Ny, Ny)
             idx_t = np.arange(Ny - 1, Nx * Ny, Ny)
-            matrix[idx_b, idx_b + 1] = -2 * alpha_y
-            matrix[idx_t, idx_t - 1] = -2 * alpha_y
             rhs[idx_b] -= fy
             rhs[idx_t] += fy
 
@@ -275,13 +261,10 @@ class CrankNicolsonBCSchema(Schema):
             Nx, Ny, Nz = self.grid_points
             dx, dy, dz = self.dx
             sx, sy = Ny * Nz, Nz
-            alpha_x, alpha_y, alpha_z = get_alpha(dx), get_alpha(dy), get_alpha(dz)
             fx, fy, fz = get_forcing(dx), get_forcing(dy), get_forcing(dz)
 
             # X-planes
             idx_l, idx_r = np.arange(sx), np.arange((Nx-1)*sx, Nx*sx)
-            matrix[idx_l, idx_l + sx] = -2 * alpha_x
-            matrix[idx_r, idx_r - sx] = -2 * alpha_x
             rhs[idx_l] -= fx
             rhs[idx_r] += fx
 
@@ -289,39 +272,35 @@ class CrankNicolsonBCSchema(Schema):
             base_y = np.arange(Nz)
             idx_f = np.concatenate([base_y + i*sx for i in range(Nx)])
             idx_bk = idx_f + (Ny-1)*sy
-            matrix[idx_f, idx_f + sy] = -2 * alpha_y
-            matrix[idx_bk, idx_bk - sy] = -2 * alpha_y
             rhs[idx_f] -= fy
             rhs[idx_bk] += fy
 
             # Z-planes
             idx_bt = np.arange(0, Nx*Ny*Nz, Nz)
             idx_tp = np.arange(Nz-1, Nx*Ny*Nz, Nz)
-            matrix[idx_bt, idx_bt + 1] = -2 * alpha_z
-            matrix[idx_tp, idx_tp - 1] = -2 * alpha_z
             rhs[idx_bt] -= fz
             rhs[idx_tp] += fz
 
         return rhs
 
-    def _apply_dirichlet_bc(self, matrix, rhs):
+    def _apply_dirichlet_bc(self, rhs):
         """Apply Dirichlet BC."""
         value = self._boundary_conditions._get_value(self.t + self.dt)
         
         if self.ndim == 1:
-            matrix[0, :] = 0; matrix[0, 0] = 1; rhs[0] = value
-            matrix[-1, :] = 0; matrix[-1, -1] = 1; rhs[-1] = value
+            rhs[0] = value
+            rhs[-1] = value
             
         elif self.ndim == 2:
             Nx, Ny = self.grid_points
             # Left/Right
             for j in range(Ny):
-                idx = j*Nx; matrix[idx,:]=0; matrix[idx,idx]=1; rhs[idx]=value
-                idx2= j*Nx+Nx-1; matrix[idx2,:]=0; matrix[idx2,idx2]=1; rhs[idx2]=value
+                idx = j*Nx; rhs[idx]=value
+                idx2= j*Nx+Nx-1; rhs[idx2]=value
             # Bot/Top
             for i in range(Nx):
-                idx = i; matrix[idx,:]=0; matrix[idx,idx]=1; rhs[idx]=value
-                idx2= (Ny-1)*Nx+i; matrix[idx2,:]=0; matrix[idx2,idx2]=1; rhs[idx2]=value
+                idx = i; rhs[idx]=value
+                idx2= (Ny-1)*Nx+i; rhs[idx2]=value
                 
         elif self.ndim == 3:
             Nx, Ny, Nz = self.grid_points
@@ -330,21 +309,20 @@ class CrankNicolsonBCSchema(Schema):
             # X-faces
             for j in range(Ny):
                 for k in range(Nz):
-                    idx = 0*Ny*Nz + j*Nz + k; matrix[idx,:]=0; matrix[idx,idx]=1; rhs[idx]=value
-                    idx = (Nx-1)*Ny*Nz + j*Nz + k; matrix[idx,:]=0; matrix[idx,idx]=1; rhs[idx]=value
+                    idx = 0*Ny*Nz + j*Nz + k; rhs[idx]=value
+                    idx = (Nx-1)*Ny*Nz + j*Nz + k; rhs[idx]=value
             # Y-faces
             for i in range(Nx):
                 for k in range(Nz):
-                    idx = i*Ny*Nz + 0*Nz + k; matrix[idx,:]=0; matrix[idx,idx]=1; rhs[idx]=value
-                    idx = i*Ny*Nz + (Ny-1)*Nz + k; matrix[idx,:]=0; matrix[idx,idx]=1; rhs[idx]=value
+                    idx = i*Ny*Nz + 0*Nz + k; rhs[idx]=value
+                    idx = i*Ny*Nz + (Ny-1)*Nz + k; rhs[idx]=value
             # Z-faces
             for i in range(Nx):
                 for j in range(Ny):
-                    idx = i*Ny*Nz + j*Nz + 0; matrix[idx,:]=0; matrix[idx,idx]=1; rhs[idx]=value
-                    idx = i*Ny*Nz + j*Nz + (Nz-1); matrix[idx,:]=0; matrix[idx,idx]=1; rhs[idx]=value
+                    idx = i*Ny*Nz + j*Nz + 0; rhs[idx]=value
+                    idx = i*Ny*Nz + j*Nz + (Nz-1); rhs[idx]=value
 
         return rhs
-
     # =========================================================================
     # EXPLICIT LAPLACIAN LOGIC (From ExplicitEulerBCSchema)
     # =========================================================================
@@ -568,3 +546,123 @@ class CrankNicolsonBCSchema(Schema):
         """
         super().set_decay_rate(value)
         self._build_system_matrices()
+
+    def set_boundary_conditions(self, boundary_conditions) -> None:
+        """
+        Set boundary conditions and rebuild system matrix if needed.
+        
+        Parameters
+        ----------
+        boundary_conditions : DirichletBC or NeumannBC
+            Boundary condition object.
+        """
+        super().set_boundary_conditions(boundary_conditions)
+
+        if not isinstance(boundary_conditions, (DirichletBC, NeumannBC)):
+            raise ValueError("Boundary conditions must be either DirichletBC or NeumannBC.")
+        
+        A = self.A_impl.copy().tolil()  
+            
+        if isinstance(boundary_conditions, DirichletBC):
+            """Apply Dirichlet BC."""
+            if self.ndim == 1:
+                A[0, :] = 0; A[0, 0] = 1
+                A[-1, :] = 0; A[-1, -1] = 1
+                
+            elif self.ndim == 2:
+                Nx, Ny = self.grid_points
+                # Left/Right
+                for j in range(Ny):
+                    idx = j*Nx; A[idx,:]=0; A[idx,idx]=1
+                    idx2= j*Nx+Nx-1; A[idx2,:]=0; A[idx2,idx2]=1
+                # Bot/Top
+                for i in range(Nx):
+                    idx = i; A[idx,:]=0; A[idx,idx]=1
+                    idx2= (Ny-1)*Nx+i; A[idx2,:]=0; A[idx2,idx2]=1
+                    
+            elif self.ndim == 3:
+                Nx, Ny, Nz = self.grid_points
+                # Simple iteration for brevity in this example
+                # (Ideally utilize vectorized indexing like in Explicit schema if perf is critical)
+                # X-faces
+                for j in range(Ny):
+                    for k in range(Nz):
+                        idx = 0*Ny*Nz + j*Nz + k; A[idx,:]=0; A[idx,idx]=1
+                        idx = (Nx-1)*Ny*Nz + j*Nz + k; A[idx,:]=0; A[idx,idx]=1
+                # Y-faces
+                for i in range(Nx):
+                    for k in range(Nz):
+                        idx = i*Ny*Nz + 0*Nz + k; A[idx,:]=0; A[idx,idx]=1
+                        idx = i*Ny*Nz + (Ny-1)*Nz + k; A[idx,:]=0; A[idx,idx]=1
+                # Z-faces
+                for i in range(Nx):
+                    for j in range(Ny):
+                        idx = i*Ny*Nz + j*Nz + 0; A[idx,:]=0; A[idx,idx]=1
+                        idx = i*Ny*Nz + j*Nz + (Nz-1); A[idx,:]=0; A[idx,idx]=1
+
+        elif isinstance(boundary_conditions, NeumannBC):
+            """Apply Neumann BC to RHS vector."""
+            D = self.diffusion_coefficient
+            dt = self.dt
+            theta = self.theta
+
+            # Common calculation for forcing term (matches Implicit logic adjusted for theta)
+            # Note: Implicit had forcing = (2*dt*D*flux)/dx. Here we scale by theta.
+            def get_alpha(h): return (theta * dt * D) / (h**2)
+
+            if self.ndim == 1:
+                N, dx = self.grid_points[0], self.dx[0]
+                alpha = get_alpha(dx)
+                
+                # Left (i=0): Neighbor (i=1) weight doubles (subtract 2*alpha from existing)
+                # Existing was -alpha, we want -2alpha, so subtract alpha more.
+                # But simpler: just overwrite/add. Implicit used: matrix[0,1] -= alpha (or = -2alpha)
+                # Since matrix is (I - ...), off-diagonals are -theta*dt*D/h^2 = -alpha.
+                # We set it to -2*alpha.
+                A[0, 1] = -2 * alpha
+                
+                # Right (i=N-1)
+                A[-1, -2] = -2 * alpha
+
+            elif self.ndim == 2:
+                Nx, Ny = self.grid_points
+                dx, dy = self.dx
+                alpha_x, alpha_y = get_alpha(dx), get_alpha(dy)
+
+                # Left/Right (Stride Ny)
+                idx_l = np.arange(Ny)
+                idx_r = np.arange((Nx - 1) * Ny, Nx * Ny)
+                A[idx_l, idx_l + Ny] = -2 * alpha_x
+                A[idx_r, idx_r - Ny] = -2 * alpha_x
+
+                # Bottom/Top (Stride 1)
+                idx_b = np.arange(0, Nx * Ny, Ny)
+                idx_t = np.arange(Ny - 1, Nx * Ny, Ny)
+                A[idx_b, idx_b + 1] = -2 * alpha_y
+                A[idx_t, idx_t - 1] = -2 * alpha_y
+
+            elif self.ndim == 3:
+                Nx, Ny, Nz = self.grid_points
+                dx, dy, dz = self.dx
+                sx, sy = Ny * Nz, Nz
+                alpha_x, alpha_y, alpha_z = get_alpha(dx), get_alpha(dy), get_alpha(dz)
+
+                # X-planes
+                idx_l, idx_r = np.arange(sx), np.arange((Nx-1)*sx, Nx*sx)
+                A[idx_l, idx_l + sx] = -2 * alpha_x
+                A[idx_r, idx_r - sx] = -2 * alpha_x
+
+                # Y-planes
+                base_y = np.arange(Nz)
+                idx_f = np.concatenate([base_y + i*sx for i in range(Nx)])
+                idx_bk = idx_f + (Ny-1)*sy
+                A[idx_f, idx_f + sy] = -2 * alpha_y
+                A[idx_bk, idx_bk - sy] = -2 * alpha_y
+
+                # Z-planes
+                idx_bt = np.arange(0, Nx*Ny*Nz, Nz)
+                idx_tp = np.arange(Nz-1, Nx*Ny*Nz, Nz)
+                A[idx_bt, idx_bt + 1] = -2 * alpha_z
+                A[idx_tp, idx_tp - 1] = -2 * alpha_z
+
+        self.A_impl = A.tocsr()        

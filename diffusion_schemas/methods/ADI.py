@@ -122,10 +122,9 @@ class ADISchema(Schema):
         # --------------------- 1D CASE ---------------------
         if self.ndim == 1:
             rhs = self.state + self.dt * source if source is not None else self.state
-            Ax = self.system_matrix.copy().tolil()
             rhs = rhs.reshape(self.grid_points[0], 1)
             # No BCs applied to Ax or rhs here
-            self.state = spsolve(Ax.tocsr(), rhs).reshape(self.grid_points)
+            self.state = spsolve(self.system_matrix, rhs).reshape(self.grid_points)
             # Apply BCs after solve
             if self._boundary_conditions is not None:
                 self.state = self._apply_boundary_conditions(self.state)
@@ -136,16 +135,14 @@ class ADISchema(Schema):
             dt_half = self.dt / 2.0
 
             LHS_x, RHS_x, LHS_y, RHS_y = self.system_matrix
-            LHS_x_lil = LHS_x.copy().tolil()
-            LHS_y_lil = LHS_y.copy().tolil()
             
             # CHANGE: SPLIT SOURCE TERM IN HALF FOR EACH SWEEP
             half_source = (dt_half) * source if source is not None else 0.0
             
             # --- SWEEP 1: Implicit X, Explicit Y ---
             rhs_1 = (RHS_y @ self.state.T).T + half_source
-            # No BCs applied to LHS_x_lil or rhs_1 here
-            u_star = spsolve(LHS_x_lil.tocsr(), rhs_1)
+            # No BCs applied to LHS_x or rhs_1 here
+            u_star = spsolve(LHS_x, rhs_1)
             # Apply BCs after solve
             if self._boundary_conditions is not None:
                 u_star = self._apply_boundary_conditions(u_star)
@@ -154,8 +151,8 @@ class ADISchema(Schema):
             # RHS_x evaluates along X (axis 0).
             rhs_2 = (RHS_x @ u_star) + half_source
             rhs_2_T = rhs_2.T
-            # No BCs applied to LHS_y_lil or rhs_2_T here
-            u_new_T = spsolve(LHS_y_lil.tocsr(), rhs_2_T)
+            # No BCs applied to LHS_y or rhs_2_T here
+            u_new_T = spsolve(LHS_y, rhs_2_T)
 
             self.state = u_new_T.T          
 
@@ -168,9 +165,6 @@ class ADISchema(Schema):
             dt_third = self.dt / 3.0                
             Nx, Ny, Nz = self.grid_points
             LHS_x, RHS_x, LHS_y, RHS_y, LHS_z, RHS_z = self.system_matrix
-            LHS_x_lil = LHS_x.copy().tolil()
-            LHS_y_lil = LHS_y.copy().tolil()
-            LHS_z_lil = LHS_z.copy().tolil()
 
             state_flat = self.state.flatten()
             third_source = dt_third * source if source is not None else 0.0
@@ -185,7 +179,7 @@ class ADISchema(Schema):
             rhs_1 = u_y_expl + u_z_expl - self.state + third_source
             
             rhs_1_x = rhs_1.reshape(Nx, Ny * Nz)
-            u_star = spsolve(LHS_x.tocsr(), rhs_1_x).reshape(Nx, Ny, Nz)
+            u_star = spsolve(LHS_x, rhs_1_x).reshape(Nx, Ny, Nz)
 
             # Apply BCs after solve
             if self._boundary_conditions is not None:
@@ -198,7 +192,7 @@ class ADISchema(Schema):
             rhs_2 = u_x_expl + u_z_expl - u_star + third_source
             
             rhs_2_y = rhs_2.transpose(1, 0, 2).reshape(Ny, Nx * Nz)
-            u_star_star = spsolve(LHS_y.tocsr(), rhs_2_y).reshape(Ny, Nx, Nz).transpose(1, 0, 2)
+            u_star_star = spsolve(LHS_y, rhs_2_y).reshape(Ny, Nx, Nz).transpose(1, 0, 2)
 
             self.state = u_new_T.T
             # Apply BCs after solve
@@ -212,7 +206,7 @@ class ADISchema(Schema):
             rhs_3 = u_x_expl + u_y_expl - u_star_star + third_source
             
             rhs_3_z = rhs_3.transpose(2, 0, 1).reshape(Nz, Nx * Ny)
-            u_final_z = spsolve(LHS_z.tocsr(), rhs_3_z).reshape(Nz, Nx, Ny).transpose(1, 2, 0)
+            u_final_z = spsolve(LHS_z, rhs_3_z).reshape(Nz, Nx, Ny).transpose(1, 2, 0)
             
             if self._boundary_conditions is not None:
                 u_final_z = self._apply_boundary_conditions(u_final_z)
@@ -221,7 +215,7 @@ class ADISchema(Schema):
         
         self.t += self.dt
 
-        def set_diffusion_coefficient(self, value: float) -> None:
+    def set_diffusion_coefficient(self, value: float) -> None:
         super().set_diffusion_coefficient(value)
         self._build_system_matrix()
     

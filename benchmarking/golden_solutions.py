@@ -14,6 +14,8 @@ from abc import ABC, abstractmethod
 from typing import Callable, List, Tuple, Union, Dict, Any
 from scipy.interpolate import RegularGridInterpolator # For complex solutions that require numerical golden solution
 
+from diffusion_schemas import Schema, ImplicitLODBCSchema
+
 
 class GoldenSolution(ABC):
     """Base class for analytical solutions."""
@@ -63,8 +65,7 @@ class NumericalReferenceSolution(GoldenSolution):
         self.interpolator = RegularGridInterpolator(
             points=interpolator_points, # list of high-resolution 1D-arrays [time_array, x_array, y_array, ...]
             values=reference_history_array, # actual high-resolution data cube, at each time step for each point
-            bounds_error=False,
-            fill_value=None 
+            bounds_error=True
         )
 
     def evaluate(self, coordinates: Union[np.ndarray, Tuple[np.ndarray, ...]], t: float) -> np.ndarray:
@@ -100,8 +101,8 @@ class NumericalReferenceSolution(GoldenSolution):
 
     def save(self, filepath: str):
         """Save the golden solution to a compressed .npz file on disk."""
-        filepath = Path(filepath)
-        filepath.parent.mkdir(parents=True, exist_ok=True)
+        path = Path(filepath)
+        path.parent.mkdir(parents=True, exist_ok=True)
         save_dict = {
             'history': self.interpolator.values,
             'time': self.time_array,
@@ -109,8 +110,8 @@ class NumericalReferenceSolution(GoldenSolution):
         }
         for i, ax in enumerate(self.spatial_coords):
             save_dict[f'spatial_axis_{i}'] = np.asarray(ax)
-        np.savez_compressed(str(filepath), **save_dict)
-        print(f"Golden solution saved to {filepath}")
+        np.savez_compressed(str(path), **save_dict)
+        print(f"Golden solution saved to {path}")
 
     @classmethod
     def load(cls, filepath: str) -> 'NumericalReferenceSolution':
@@ -125,7 +126,7 @@ class NumericalReferenceSolution(GoldenSolution):
         )
 
 def create_numerical_reference(
-    schema_class,
+    schema_class : Schema.__class__,
     scenario_params: Dict[str, Any],
     # dx_refinement_factor: int = 10,
     # dt_refinement_factor: int = 10,
@@ -136,8 +137,8 @@ def create_numerical_reference(
     
     # Extract parameters
     domain_size = scenario_params['domain_size']
-    base_grid_points = scenario_params['grid_points']
-    base_dt = scenario_params['dt']
+    # base_grid_points = scenario_params['grid_points']
+    # base_dt = scenario_params['dt']
     t_final = scenario_params['t_final']
     
     # Determine dimensionality
@@ -198,13 +199,10 @@ def create_numerical_reference(
 
     # print(f"Running {schema.__class__.__name__} high-resolution reference simulation with dx={dx_ref}, dt={dt_ref} for t_final={t_final}...")
     # Run simulation to t_final AND capture the history list
-    history_list = schema.solve(t_final, store_history=store_history)
+    history_list, time_array = schema.solve(t_final, store_history=store_history)
     
     # Convert the list of arrays into a single stacked numpy array
     history_array = np.stack(history_list)
-    
-    # Build the time array based on how many frames were saved
-    time_array = np.linspace(0, t_final, len(history_list))
     
     # Build coordinate arrays (Updated to match your node-centered Schema base class)
     if ndim == 1:
@@ -221,9 +219,8 @@ def create_numerical_reference(
             np.linspace(0, domain_size[2], refined_grid_points[2])
         ]
 
-    
     return NumericalReferenceSolution(
-        time_array=time_array,
+        time_array=np.array(time_array),
         reference_grid_coords=coords,
         reference_history_array=history_array
     )
@@ -247,15 +244,15 @@ def create_numerical_reference_cached(
     Parameters are identical to create_numerical_reference, with the addition
     of *cache_dir* which controls where cached files are stored.
     """
+    if schema_class is None:
+        schema_class = ImplicitLODBCSchema  # Default to Implicit LOD if not specified
+
     # Build a deterministic hash from every parameter that affects the result
     cache_key_data = {
         'schema_class': schema_class.__name__,
-        # 'schema_class': 'ADIBCSchema',
         'dx_ref': dx_ref,
         'dt_ref': dt_ref,
         'domain_size': scenario_params.get('domain_size'),
-        # 'grid_points': scenario_params.get('grid_points'),
-        # 'dt': scenario_params.get('dt'),
         't_final': scenario_params.get('t_final'),
         'diffusion_coefficient': scenario_params.get('diffusion_coefficient'),
         'decay_rate': scenario_params.get('decay_rate'),
@@ -270,7 +267,6 @@ def create_numerical_reference_cached(
     ).hexdigest()[:16]
 
     scenario_name = scenario_params.get('name', 'reference')
-    # cache_path = Path(cache_dir) / f"{scenario_name}_{cache_hash}.npz"
     cache_path = Path(cache_dir) / f"{cache_hash}.npz"
 
     # Try loading from cache
@@ -378,7 +374,7 @@ class GaussianDiffusion2D(GoldenSolution):
         self.sigma0 = initial_width
         self.D = diffusion_coefficient
         
-    def evaluate(self, coordinates: Tuple[np.ndarray, np.ndarray], t: float) -> np.ndarray:
+    def evaluate(self, coordinates: Union[np.ndarray, Tuple[np.ndarray, ...]], t: float) -> np.ndarray:
         """Evaluate 2D Gaussian diffusion solution."""
         x, y = coordinates
         x0, y0 = self.center
@@ -426,7 +422,7 @@ class GaussianDiffusion3D(GoldenSolution):
         self.sigma0 = initial_width
         self.D = diffusion_coefficient
         
-    def evaluate(self, coordinates: Tuple[np.ndarray, np.ndarray, np.ndarray], t: float) -> np.ndarray:
+    def evaluate(self, coordinates: Union[np.ndarray, Tuple[np.ndarray, ...]], t: float) -> np.ndarray:
         """Evaluate 3D Gaussian diffusion solution."""
         x, y, z = coordinates
         x0, y0, z0 = self.center
@@ -587,7 +583,7 @@ class StepFunctionDiffusion1D(GoldenSolution):
         # Result simplifies to: (2 * (val_l - val_r) / nπ) * sin(nπx0/L)
         
         self.coeffs = []
-        self.wave_numbers = [] # k = nπ/L
+        wave_numbers = [] # k = nπ/L
         
         delta_v = self.val_l - self.val_r
         
@@ -604,10 +600,10 @@ class StepFunctionDiffusion1D(GoldenSolution):
             an = (2.0 / self.L) * (delta_v / k) * np.sin(k * self.x0)
             
             self.coeffs.append(an)
-            self.wave_numbers.append(k)
+            wave_numbers.append(k)
             
         self.coeffs = np.array(self.coeffs)
-        self.wave_numbers = np.array(self.wave_numbers)
+        self.wave_numbers = np.array(wave_numbers)
 
     def evaluate(self, coordinates: Union[np.ndarray, Tuple[np.ndarray, ...]], t: float) -> np.ndarray:
         """Evaluate the Fourier series solution at time t."""
@@ -702,7 +698,7 @@ class StepFunctionDiffusion2D(GoldenSolution):
             axis=1
         )
 
-    def evaluate(self, coordinates: Tuple[np.ndarray, np.ndarray], t: float) -> np.ndarray:
+    def evaluate(self, coordinates: Union[np.ndarray, Tuple[np.ndarray, ...]], t: float) -> np.ndarray:
         """
         Evaluate u(x,y,t) = u_x(x,t) * u_y(y,t)
         """
@@ -835,25 +831,13 @@ def create_golden_solution_from_dict(spec: Dict[str, Any], store_history: bool =
         )
 
     elif solution_type == 'numerical_reference':
-       # Check if already built
-        if 'reference_grid_coords' in spec:
-            return NumericalReferenceSolution(
-                reference_grid_coords=spec['reference_grid_coords'],
-                reference_solution_array=spec['reference_solution_array'],
-                t_target=spec['t_target']
-            )
-        else:
-            # Need to build it
-            from diffusion_schemas.methods_BC import ImplicitLODBCSchema # default reference schema class if not specified
-            return create_numerical_reference_cached(
-                schema_class=spec.get('schema_class') or ImplicitLODBCSchema, # returns left operand if not None, otherwise the right operand
-                scenario_params=spec['scenario_params'],
-                # dx_refinement_factor=spec.get('dx_refinement_factor', 10),
-                # dt_refinement_factor=spec.get('dt_refinement_factor', 10)
-                dx_ref=spec.get('dx_ref', 1e-3),
-                dt_ref=spec.get('dt_ref', 1e-3),
-                store_history=store_history
-            )
+        return create_numerical_reference_cached(
+            schema_class=spec.get('schema_class'),
+            scenario_params=spec['scenario_params'],
+            dx_ref=spec.get('dx_ref', 1e-3),
+            dt_ref=spec.get('dt_ref', 1e-3),
+            store_history=store_history
+        )
 
     else:
         raise ValueError(f"Unknown golden solution type: {solution_type}")

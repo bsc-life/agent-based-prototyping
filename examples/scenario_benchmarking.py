@@ -329,114 +329,27 @@ def single_tumor():
     base_scenario = get_scenario_by_name('single_tumor_2d')
     store = False
     base_scenario["store_history"] = store
+    base_scenario["t_final"] = 10
 
-    # dt = 0.5
-    single_tumor_2d_dt05 = copy.deepcopy(base_scenario)
-    single_tumor_2d_dt05["dt"] = 0.5
-    single_tumor_2d_dt05["t_final"] = 10
-    single_tumor_2d_dt05["name"] = "single_tumor_2d_dt05_dx20"
-
-    # dt = 1.0
-    single_tumor_2d_dt1 = copy.deepcopy(base_scenario)
-    single_tumor_2d_dt1["dt"] = 1.0
-    single_tumor_2d_dt1["t_final"] = 10
-    single_tumor_2d_dt1["name"] = "single_tumor_2d_dt1_dx20"
-
-    # dt = 2.0
-    single_tumor_2d_dt2 = copy.deepcopy(base_scenario)
-    single_tumor_2d_dt2["dt"] = 2.0
-    single_tumor_2d_dt2["t_final"] = 10
-    single_tumor_2d_dt2["name"] = "single_tumor_2d_dt2_dx20"
-
-    # dt = 3.0
-    single_tumor_2d_dt3 = copy.deepcopy(base_scenario)
-    single_tumor_2d_dt3["dt"] = 3.0
-    single_tumor_2d_dt3["t_final"] = 10
-    single_tumor_2d_dt3["name"] = "single_tumor_2d_dt3_dx20"
-
-    # dt = 4.0
-    single_tumor_2d_dt4 = copy.deepcopy(base_scenario)
-    single_tumor_2d_dt4["dt"] = 4.0
-    single_tumor_2d_dt4["t_final"] = 10
-    single_tumor_2d_dt4["name"] = "single_tumor_2d_dt4_dx20"
-
-    # dt = 5.0
-    single_tumor_2d_dt5 = copy.deepcopy(base_scenario)
-    single_tumor_2d_dt5["dt"] = 5.0
-    single_tumor_2d_dt5["t_final"] = 10
-    single_tumor_2d_dt5["name"] = "single_tumor_2d_dt5_dx20"
-
-    # dt = 0.4
-    single_tumor_2d_dt04 = copy.deepcopy(base_scenario)
-    single_tumor_2d_dt04["dt"] = 0.4
-    single_tumor_2d_dt04["t_final"] = 10
-    single_tumor_2d_dt04["name"] = "single_tumor_2d_dt04_dx20"
-
-    # dt = 0.3
-    single_tumor_2d_dt03 = copy.deepcopy(base_scenario)
-    single_tumor_2d_dt03["dt"] = 0.3
-    single_tumor_2d_dt03["t_final"] = 10
-    single_tumor_2d_dt03["name"] = "single_tumor_2d_dt03_dx20"
-
-    # dt = 0.2
-    single_tumor_2d_dt02 = copy.deepcopy(base_scenario)
-    single_tumor_2d_dt02["dt"] = 0.2
-    single_tumor_2d_dt02["t_final"] = 10
-    single_tumor_2d_dt02["name"] = "single_tumor_2d_dt02_dx20"
-
-    # dt = 0.1
-    single_tumor_2d_dt01 = copy.deepcopy(base_scenario)
-    single_tumor_2d_dt01["dt"] = 0.1
-    single_tumor_2d_dt01["t_final"] = 10
-    single_tumor_2d_dt01["name"] = "single_tumor_2d_dt01_dx20"
-
-    # dt = 0.05
-    single_tumor_2d_dt005 = copy.deepcopy(base_scenario)
-    single_tumor_2d_dt005["dt"] = 0.05
-    single_tumor_2d_dt005["t_final"] = 10
-    single_tumor_2d_dt005["name"] = "single_tumor_2d_dt005_dx20"
-
-    # dt = 0.01
-    single_tumor_2d_dt001 = copy.deepcopy(base_scenario)
-    single_tumor_2d_dt001["dt"] = 0.01
-    single_tumor_2d_dt001["t_final"] = 10
-    single_tumor_2d_dt001["name"] = "single_tumor_2d_dt001_dx20"
-
-    # # dt = 0.005
-    single_tumor_2d_dt0005 = copy.deepcopy(base_scenario)
-    single_tumor_2d_dt0005["dt"] = 0.005
-    single_tumor_2d_dt0005["t_final"] = 10
-    single_tumor_2d_dt0005["name"] = "single_tumor_2d_dt0005_dx20"
-
-    # # dt = 0.001
-    single_tumor_2d_dt0001 = copy.deepcopy(base_scenario)
-    single_tumor_2d_dt0001["dt"] = 0.001
-    single_tumor_2d_dt0001["t_final"] = 10
-    single_tumor_2d_dt0001["name"] = "single_tumor_2d_dt0001_dx20"
-
+    dt_values = [0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.01]
+    scenarios = []
+    
+    for dt in dt_values:
+        scenario = copy.deepcopy(base_scenario)
+        scenario["dt"] = dt
+        scenario["name"] = f"single_tumor_2d_dt{dt}".replace(".", "")
+        scenarios.append(scenario)
+    
     runner = BenchmarkRunner()
-
     # runner.add_schema(ExplicitEulerBCSchema, "Explicit Euler")
     runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
     runner.add_schema(ImplicitLODBCSchema, "Implicit LOD")
     runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
     runner.add_schema(CrankNicolsonLODBCSchema, "Crank-Nicolson LOD")
     runner.add_schema(ADIBCSchema, "ADI")
-
-    # runner.add_scenario(single_tumor_2d_dt01)
-    # runner.add_scenario(single_tumor_2d_dt001)
-    # runner.add_scenario(single_tumor_2d_dt0001)
-    # runner.add_scenario(single_tumor_2d_dt05)
-    # runner.add_scenario(single_tumor_2d_dt005)
-    # runner.add_scenario(single_tumor_2d_dt0005)
-    # runner.add_scenario(single_tumor_2d_dt02)
-    # runner.add_scenario(single_tumor_2d_dt03)
-    # runner.add_scenario(single_tumor_2d_dt04)
-    runner.add_scenario(single_tumor_2d_dt1)
-    runner.add_scenario(single_tumor_2d_dt2)
-    runner.add_scenario(single_tumor_2d_dt3)
-    runner.add_scenario(single_tumor_2d_dt4)
-    runner.add_scenario(single_tumor_2d_dt5)
+    
+    for scenario in scenarios:
+        runner.add_scenario(scenario)
     
     results = runner.run(
         output_dir='benchmark_results/single_tumor',
@@ -461,136 +374,23 @@ def multiple_tumor():
     # ensuring they do not overlap and are fully contained
 
     # Create scenarios by modifying base scenario parameters
-    store = False
+    base_scenario = get_scenario_by_name('multiple_tumor_2d')
+    store = True
+    base_scenario["golden_solution"]["dt_ref"] = 0.001
+    base_scenario["store_history"] = store
+    base_scenario["t_final"] = 10
+    
+    dx_values = [20]
+    dt_values = [0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.01]
+    scenarios = []
 
-    np.random.seed(20)  # for reproducibility
-    tumours = []
-    n = 30
-    radius = 50.0 # um
-    for i in range(n):
-        while True:
-            center = (np.random.uniform(250, 1750), np.random.uniform(250, 1750))
-            # Check for overlap with existing tumors
-            if all(np.linalg.norm(np.array(center) - np.array(t['center'])) > 2*radius for t in tumours):
-                tumours.append({
-                    'type': 'sphere',
-                    'center': center,
-                    'radius': radius,
-                    'net_rate': -10.0,
-                    'name': f'tumor_region_{i+1}'
-                })
-                break
-
-    base_scenario = copy.deepcopy(get_scenario_by_name('multiple_tumor_2d'))
-    base_scenario["bulk"]["regions"] = tumours
-
-    # multiple_tumor_2d_dt05_dx20 = copy.deepcopy(base_scenario)
-    # multiple_tumor_2d_dt05_dx20["dt"] = 0.5
-    # multiple_tumor_2d_dt05_dx20["t_final"] = 10
-    # multiple_tumor_2d_dt05_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt05_dx20["domain_size"])
-    # multiple_tumor_2d_dt05_dx20["name"] = "multiple_tumor_2d_dt05_dx20"
-
-    # multiple_tumor_2d_dt04_dx20 = copy.deepcopy(base_scenario)
-    # multiple_tumor_2d_dt04_dx20["dt"] = 0.4
-    # multiple_tumor_2d_dt04_dx20["t_final"] = 10
-    # multiple_tumor_2d_dt04_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt04_dx20["domain_size"])
-    # multiple_tumor_2d_dt04_dx20["name"] = "multiple_tumor_2d_dt04_dx20"
-
-    # multiple_tumor_2d_dt03_dx20 = copy.deepcopy(base_scenario)
-    # multiple_tumor_2d_dt03_dx20["dt"] = 0.3
-    # multiple_tumor_2d_dt03_dx20["t_final"] = 10
-    # multiple_tumor_2d_dt03_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt03_dx20["domain_size"])
-    # multiple_tumor_2d_dt03_dx20["name"] = "multiple_tumor_2d_dt03_dx20"
-
-    # multiple_tumor_2d_dt02_dx20 = copy.deepcopy(base_scenario)
-    # multiple_tumor_2d_dt02_dx20["dt"] = 0.2
-    # multiple_tumor_2d_dt02_dx20["t_final"] = 10
-    # multiple_tumor_2d_dt02_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt02_dx20["domain_size"])
-    # multiple_tumor_2d_dt02_dx20["name"] = "multiple_tumor_2d_dt02_dx20"
-
-    # multiple_tumor_2d_dt01_dx20 = copy.deepcopy(base_scenario)
-    # multiple_tumor_2d_dt01_dx20["dt"] = 0.1
-    # multiple_tumor_2d_dt01_dx20["t_final"] = 10
-    # multiple_tumor_2d_dt01_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt01_dx20["domain_size"])
-    # multiple_tumor_2d_dt01_dx20["name"] = "multiple_tumor_2d_dt01_dx20"
-
-    # multiple_tumor_2d_dt005_dx20 = copy.deepcopy(base_scenario)
-    # multiple_tumor_2d_dt005_dx20["dt"] = 0.05
-    # multiple_tumor_2d_dt005_dx20["t_final"] = 10
-    # multiple_tumor_2d_dt005_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt005_dx20["domain_size"])
-    # multiple_tumor_2d_dt005_dx20["name"] = "multiple_tumor_2d_dt005_dx20"
-
-    # multiple_tumor_2d_dt001_dx20 = copy.deepcopy(base_scenario)
-    # multiple_tumor_2d_dt001_dx20["dt"] = 0.01
-    # multiple_tumor_2d_dt001_dx20["t_final"] = 10
-    # multiple_tumor_2d_dt001_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt001_dx20["domain_size"])
-    # multiple_tumor_2d_dt001_dx20["name"] = "multiple_tumor_2d_dt001_dx20"
-
-    # multiple_tumor_2d_dt0005_dx20 = copy.deepcopy(base_scenario)
-    # multiple_tumor_2d_dt0005_dx20["dt"] = 0.005
-    # multiple_tumor_2d_dt0005_dx20["t_final"] = 10
-    # multiple_tumor_2d_dt0005_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt0005_dx20["domain_size"])
-    # multiple_tumor_2d_dt0005_dx20["name"] = "multiple_tumor_2d_dt0005_dx20"
-
-    # multiple_tumor_2d_dt0001_dx20 = copy.deepcopy(base_scenario)
-    # multiple_tumor_2d_dt0001_dx20["dt"] = 0.001
-    # multiple_tumor_2d_dt0001_dx20["t_final"] = 10
-    # multiple_tumor_2d_dt0001_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt0001_dx20["domain_size"])
-    # multiple_tumor_2d_dt0001_dx20["name"] = "multiple_tumor_2d_dt0001_dx20"
-
-    # multiple_tumor_2d_dt1_dx20 = copy.deepcopy(base_scenario)
-    # multiple_tumor_2d_dt1_dx20["dt"] = 1
-    # multiple_tumor_2d_dt1_dx20["t_final"] = 10
-    # multiple_tumor_2d_dt1_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt1_dx20["domain_size"])
-    # multiple_tumor_2d_dt1_dx20["name"] = "multiple_tumor_2d_dt1_dx20"
-
-    # multiple_tumor_2d_dt2_dx20 = copy.deepcopy(base_scenario)
-    # multiple_tumor_2d_dt2_dx20["dt"] = 2
-    # multiple_tumor_2d_dt2_dx20["t_final"] = 10
-    # multiple_tumor_2d_dt2_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt2_dx20["domain_size"])
-    # multiple_tumor_2d_dt2_dx20["name"] = "multiple_tumor_2d_dt2_dx20"
-
-    # multiple_tumor_2d_dt3_dx20 = copy.deepcopy(base_scenario)
-    # multiple_tumor_2d_dt3_dx20["dt"] = 3
-    # multiple_tumor_2d_dt3_dx20["t_final"] = 10
-    # multiple_tumor_2d_dt3_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt3_dx20["domain_size"])
-    # multiple_tumor_2d_dt3_dx20["name"] = "multiple_tumor_2d_dt3_dx20"
-
-    # multiple_tumor_2d_dt4_dx20 = copy.deepcopy(base_scenario)
-    # multiple_tumor_2d_dt4_dx20["dt"] = 4
-    # multiple_tumor_2d_dt4_dx20["t_final"] = 10
-    # multiple_tumor_2d_dt4_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt4_dx20["domain_size"])
-    # multiple_tumor_2d_dt4_dx20["name"] = "multiple_tumor_2d_dt4_dx20"
-
-    # multiple_tumor_2d_dt5_dx20 = copy.deepcopy(base_scenario)
-    # multiple_tumor_2d_dt5_dx20["dt"] = 5
-    # multiple_tumor_2d_dt5_dx20["t_final"] = 10
-    # multiple_tumor_2d_dt5_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt5_dx20["domain_size"])
-    # multiple_tumor_2d_dt5_dx20["name"] = "multiple_tumor_2d_dt5_dx20"
-
-    # multiple_tumor_2d_dt00001_dx20 = copy.deepcopy(base_scenario)
-    # multiple_tumor_2d_dt00001_dx20["dt"] = 0.0001
-    # multiple_tumor_2d_dt00001_dx20["t_final"] = 10
-    # multiple_tumor_2d_dt00001_dx20["grid_points"] = tuple(int(s / 20.0) for s in multiple_tumor_2d_dt00001_dx20["domain_size"])
-    # multiple_tumor_2d_dt00001_dx20["name"] = "multiple_tumor_2d_dt00001_dx20"
-
-    # multiple_tumor_2d_dt001_dx10 = copy.deepcopy(base_scenario)
-    # multiple_tumor_2d_dt001_dx10["dt"] = 0.01
-    # multiple_tumor_2d_dt001_dx10["t_final"] = 5
-    # multiple_tumor_2d_dt001_dx10["grid_points"] = tuple(int(s / 10.0) for s in multiple_tumor_2d_dt001_dx10["domain_size"])
-    # multiple_tumor_2d_dt001_dx10["name"] = "multiple_tumor_2d_dt001_dx10"
-
-    # multiple_tumor_2d_dt001_dx30 = copy.deepcopy(base_scenario)
-    # multiple_tumor_2d_dt001_dx30["dt"] = 0.01
-    # multiple_tumor_2d_dt001_dx30["t_final"] = 5
-    # multiple_tumor_2d_dt001_dx30["grid_points"] = tuple(int(s / 30.0) for s in multiple_tumor_2d_dt001_dx30["domain_size"])
-    # multiple_tumor_2d_dt001_dx30["name"] = "multiple_tumor_2d_dt001_dx30"
-
-    # multiple_tumor_2d_dt001_dx40 = copy.deepcopy(base_scenario)
-    # multiple_tumor_2d_dt001_dx40["dt"] = 0.01
-    # multiple_tumor_2d_dt001_dx40["t_final"] = 5
-    # multiple_tumor_2d_dt001_dx40["grid_points"] = tuple(int(s / 40.0) for s in multiple_tumor_2d_dt001_dx40["domain_size"])
-    # multiple_tumor_2d_dt001_dx40["name"] = "multiple_tumor_2d_dt001_dx40"
+    for dt in dt_values:
+        for dx in dx_values:
+            scenario = copy.deepcopy(base_scenario)
+            scenario["dt"] = dt
+            scenario["grid_points"] = tuple(int(s / dx) for s in scenario["domain_size"])
+            scenario["name"] = f"multiple_tumor_2d_dt{dt}_dx{dx}".replace(".", "")
+            scenarios.append(scenario)
 
     # Parametric sweep over dx values, keeping dt fixed at 0.01
     dt_values = [0.001,0.005,0.01,0.05,0.1,0.5,1,5]
@@ -616,7 +416,7 @@ def multiple_tumor():
     runner.add_schema(ADIBCSchema, "ADI")
 
     for scenario in scenarios:
-        runner.add_scenario(scenario=scenario)
+        runner.add_scenario(scenario)
 
     # fig = plot_scenario(
     #     scenario=scenarios[0],
@@ -637,7 +437,8 @@ def multiple_tumor():
 
 def main():
 
-    results, summary = cosine_diffusion()
+    results, summary = single_tumour()
+    # results, summary = multiple_tumour()
 
 if __name__ == "__main__":
     main()
