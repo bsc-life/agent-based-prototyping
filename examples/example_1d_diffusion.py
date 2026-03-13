@@ -54,7 +54,7 @@ def main():
     # Solve
     start = time.time()
     print(f"\nSolving from t=0 to t={t_final}...")
-    history = schema.solve(t_final=t_final, store_history=True)
+    history, times = schema.solve(t_final=t_final, store_history=True)
     print(f"Completed {len(history)} time steps")
     end = time.time()
     print(f"Time taken: {end - start:.3f} seconds")
@@ -79,7 +79,6 @@ def main():
     
     # Plot evolution over time (every 10th frame)
     skip = max(1, len(history) // 20)
-    times = np.arange(0, len(history) * dt, skip * dt)
     for i, t in enumerate(times):
         idx = int(i * skip)
         if idx < len(history):

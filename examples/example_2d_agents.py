@@ -60,7 +60,7 @@ def main():
     
     # Solve with history
     print(f"\nSolving from t=0 to t={t_final}...")
-    history = schema.solve(t_final=t_final, store_history=True)
+    history, times = schema.solve(t_final=t_final, store_history=True)
     print(f"Completed {len(history)} time steps")
     
     # Create coordinate grids for plotting
@@ -130,7 +130,7 @@ def main():
     
     def animate(frame_idx):
         idx = frames_to_plot[frame_idx]
-        t = idx * dt
+        t = times[idx]
         ax_anim.clear()
         
         contour = ax_anim.contourf(X, Y, history[idx], levels=20, cmap='hot', vmin=vmin, vmax=vmax)
