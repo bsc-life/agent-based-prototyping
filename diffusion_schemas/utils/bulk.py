@@ -532,7 +532,18 @@ class Bulk:
         with time-dependent rates, by avoiding repeated calls to get_net_rate
         during source computation.
         """
-        if self._precomputed:
+        
+        # Check one by one if any region has a callable rate. 
+        # If all are constant, we can skip precomputation after the first time.
+        all_constant = True
+        for region in self._regions:
+            if isinstance(region, NetRegion) and callable(region.net_rate):
+                all_constant = False
+                break
+            if isinstance(region, LinearRegion) and callable(region.linear_rate):
+                all_constant = False
+                break
+        if self._precomputed and all_constant:
             return
         self._precomputed = True
 
