@@ -370,11 +370,11 @@ class NetRegion(Region):
         return f"Region(name='{self.name}', domain={self.domain}, net_rate={rate})"
     
 class LinearRegion(Region):
-    def __init__(self, domain: RegionDomain, linear_rate: float, name: str = ""):
+    def __init__(self, domain: RegionDomain, linear_rate: Union[float, Callable], name: str = ""):
         super().__init__(domain, name=name)
         self.linear_rate = linear_rate
 
-    def set_linear_rate(self, rate: float) -> None:
+    def set_linear_rate(self, rate: Union[float, Callable] = 0.0) -> None:
         self.linear_rate = rate 
 
     def get_linear_rate(self, t: float) -> float:
@@ -383,12 +383,12 @@ class LinearRegion(Region):
         return self.linear_rate
 
 class TargetRegion(LinearRegion):
-    def __init__(self, domain: RegionDomain, linear_rate: float, rho_target: float, name: str = ""):
+    def __init__(self, domain: RegionDomain, linear_rate: Union[float, Callable], rho_target: Union[float, Callable], name: str = ""):
         super().__init__(domain, linear_rate=linear_rate, name=name)
         self.rho_target = rho_target
 
-    def set_rho_target(self, target: float) -> None:
-        self.rho_target = target 
+    def set_rho_target(self, target: Union[float, Callable]) -> None:
+        self.rho_target = target
 
     def get_rho_target(self, t: float) -> float:
         if callable(self.rho_target):
@@ -450,12 +450,14 @@ class Bulk:
         for i, r in enumerate(self._regions):
             if r.name == name:
                 self._regions.pop(i)
+                self._precomputed = False
                 return
         raise ValueError(f"No region named '{name}'")
 
     def clear_regions(self) -> None:
         """Remove all regions."""
         self._regions = []
+        self._precomputed = False
 
     @property
     def regions(self) -> List[Region]:
@@ -499,19 +501,20 @@ class Bulk:
             Source term array, same shape as the coordinate grids.
         """
 
-        self._precompute_rates(coords, dx)
+        self._precompute_rates(coords, dx, t)
         source = (self._net_cached_rates + 
                   field * self._linear_cached_rates - 
                   field * self._target_cached_rates - self._target_cached_bias)
 
-        for region in self._regions:
-            if isinstance(region, TargetRegion):
-                rate = region.get_linear_rate(t)
-                rho_target = region.get_rho_target(t)
-                if rate == 0.0:
-                    continue
-                overlap = region.domain.rasterize(coords, dx)
-                source += overlap * rate * (rho_target - field)
+        # Implementation of cached target rates and biases makes us not need this part
+        # for region in self._regions:
+        #     if isinstance(region, TargetRegion):
+        #         rate = region.get_linear_rate(t)
+        #         rho_target = region.get_rho_target(t)
+        #         if rate == 0.0:
+        #             continue
+        #         overlap = region.domain.rasterize(coords, dx)
+        #         source += overlap * rate * (rho_target - field)
 
         # Negative fields problem (revisit this logic)
         # If there exists any negative values
@@ -526,7 +529,7 @@ class Bulk:
 
         return source
     
-    def _precompute_rates(self, coords, dx) -> None:
+    def _precompute_rates(self, coords, dx, t) -> None:
         """
         Precompute net rates for all regions at the current time step.
         
@@ -558,14 +561,14 @@ class Bulk:
         self._target_cached_rates = np.zeros_like(coords[0])
         self._target_cached_bias = np.zeros_like(coords[0])
         for region in self._regions:
-            if isinstance(region, LinearRegion):
-                self._linear_cached_rates += region.domain.rasterize(coords, dx) * region.linear_rate
-            elif isinstance(region, NetRegion): 
-                self._net_cached_rates += region.domain.rasterize(coords, dx) * region.net_rate
-            elif isinstance(region, TargetRegion):
+            if isinstance(region, TargetRegion):
                 rasterization = region.domain.rasterize(coords, dx)
-                self._target_cached_rates += rasterization * region.get_linear_rate
-                self._target_cached_bias += rasterization * region.get_linear_rate * region.get_rho_target
+                self._target_cached_rates += rasterization * region.get_linear_rate(t)
+                self._target_cached_bias += rasterization * region.get_linear_rate(t) * region.get_rho_target(t)
+            elif isinstance(region, LinearRegion):
+                self._linear_cached_rates += region.domain.rasterize(coords, dx) * region.get_linear_rate(t)
+            elif isinstance(region, NetRegion): 
+                self._net_cached_rates += region.domain.rasterize(coords, dx) * region.get_net_rate(t)
 
     def __repr__(self) -> str:
         return f"Bulk(n_regions={len(self._regions)})"
