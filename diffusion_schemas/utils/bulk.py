@@ -500,7 +500,9 @@ class Bulk:
         """
 
         self._precompute_rates(coords, dx)
-        source = self._net_cached_rates + field * self._linear_cached_rates
+        source = (self._net_cached_rates + 
+                  field * self._linear_cached_rates - 
+                  field * self._target_cached_rates - self._target_cached_bias)
 
         for region in self._regions:
             if isinstance(region, TargetRegion):
@@ -540,20 +542,30 @@ class Bulk:
             if isinstance(region, NetRegion) and callable(region.net_rate):
                 all_constant = False
                 break
-            if isinstance(region, LinearRegion) and callable(region.linear_rate):
+            elif isinstance(region, LinearRegion) and callable(region.linear_rate):
                 all_constant = False
                 break
+            elif isinstance(region, TargetRegion):
+                if callable(region.linear_rate) or callable(region.rho_target):
+                    all_constant = False
+                    break
         if self._precomputed and all_constant:
             return
         self._precomputed = True
 
         self._net_cached_rates = np.zeros_like(coords[0])
         self._linear_cached_rates = np.zeros_like(coords[0])
+        self._target_cached_rates = np.zeros_like(coords[0])
+        self._target_cached_bias = np.zeros_like(coords[0])
         for region in self._regions:
             if isinstance(region, LinearRegion):
                 self._linear_cached_rates += region.domain.rasterize(coords, dx) * region.linear_rate
             elif isinstance(region, NetRegion): 
                 self._net_cached_rates += region.domain.rasterize(coords, dx) * region.net_rate
+            elif isinstance(region, TargetRegion):
+                rasterization = region.domain.rasterize(coords, dx)
+                self._target_cached_rates += rasterization * region.get_linear_rate
+                self._target_cached_bias += rasterization * region.get_linear_rate * region.get_rho_target
 
     def __repr__(self) -> str:
         return f"Bulk(n_regions={len(self._regions)})"
