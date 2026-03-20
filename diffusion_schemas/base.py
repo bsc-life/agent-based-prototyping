@@ -310,33 +310,19 @@ class Schema(ABC):
             history.append(self.state.copy())
             times.append(self.t)
         
+        epsilon = 1e-10
         pbar = None
         if progress:
             # Properly calculate number of steps to display in progress bar
             # accounting for floating point rounding issues
             n_steps = 0
             temp_t = self.t
-            while temp_t < t_final:
+            while temp_t < t_final - epsilon:
                 temp_t += self.dt
                 n_steps += 1
             pbar = tqdm(total=n_steps, desc="Solving", unit="step", dynamic_ncols=True)
 
-        while self.t < t_final:
-            # # Adjust last step to hit t_final exactly if needed
-            # if self.t + self.dt > t_final:
-            #     old_dt = self.dt
-            #     self.dt = t_final - self.t
-
-            #     # Solve BC integration into matrices problem
-            #     if hasattr(self, '_build_system_matrix'):
-            #         self._build_system_matrix()
-            #     elif hasattr(self, '_build_system_matrices'):
-            #         self._build_system_matrices()
-
-            #     self.step()
-            #     self.dt = old_dt
-            # else:
-            #     self.step()
+        while self.t < t_final - epsilon:
             self.step()
             
             if store_history:

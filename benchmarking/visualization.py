@@ -92,14 +92,14 @@ def plot_final_comparison(numerical: np.ndarray,
         vmin = min(numerical.min(), analytical.min())
         vmax = max(numerical.max(), analytical.max())
         
-        im0 = axes[0].contourf(x, y, numerical, levels=20, cmap='viridis', vmin=vmin, vmax=vmax)
+        im0 = axes[0].contourf(x, y, numerical, levels=20, cmap='viridis')
         axes[0].set_xlabel('x')
         axes[0].set_ylabel('y')
         axes[0].set_title('Numerical')
         axes[0].set_aspect('equal')
         plt.colorbar(im0, ax=axes[0])
         
-        im1 = axes[1].contourf(x, y, analytical, levels=20, cmap='viridis', vmin=vmin, vmax=vmax)
+        im1 = axes[1].contourf(x, y, analytical, levels=20, cmap='viridis')
         axes[1].set_xlabel('x')
         axes[1].set_ylabel('y')
         axes[1].set_title('Analytical')
@@ -131,7 +131,7 @@ def plot_final_comparison(numerical: np.ndarray,
         
         # XY plane
         im00 = axes[0, 0].contourf(x[:, :, center_idx], y[:, :, center_idx], num_slice, 
-                                    levels=20, cmap='viridis', vmin=vmin, vmax=vmax)
+                                    levels=20, cmap='viridis')
         axes[0, 0].set_xlabel('x')
         axes[0, 0].set_ylabel('y')
         axes[0, 0].set_title('Numerical (XY center slice)')
@@ -139,7 +139,7 @@ def plot_final_comparison(numerical: np.ndarray,
         plt.colorbar(im00, ax=axes[0, 0])
         
         im01 = axes[0, 1].contourf(x[:, :, center_idx], y[:, :, center_idx], ana_slice, 
-                                    levels=20, cmap='viridis', vmin=vmin, vmax=vmax)
+                                    levels=20, cmap='viridis')
         axes[0, 1].set_xlabel('x')
         axes[0, 1].set_ylabel('y')
         axes[0, 1].set_title('Analytical (XY center slice)')
@@ -441,7 +441,7 @@ def plot_time_evolution(history: List[np.ndarray],
             # countourf faces problems trying to plot results
             # white spots appear and colorbars do not obey vmin and vmax
             # im = ax.contourf(x, y, numerical, levels=20, cmap='viridis', vmin=vmin, vmax=vmax)
-            im = ax.pcolormesh(x, y, numerical, vmin=vmin, vmax=vmax, shading='auto')
+            im = ax.pcolormesh(x, y, numerical, shading='auto')
             ax.set_xlabel('x')
             ax.set_ylabel('y')
             ax.set_title(f't = {t:.4f}')
@@ -488,7 +488,7 @@ def plot_time_evolution(history: List[np.ndarray],
             numerical_slice = history[idx][:, :, center_idx]
             
             im = ax.contourf(x[:, :, center_idx], y[:, :, center_idx], numerical_slice, 
-                           levels=20, cmap='viridis', vmin=vmin, vmax=vmax)
+                           levels=20, cmap='viridis')
             ax.set_xlabel('x')
             ax.set_ylabel('y')
             ax.set_title(f't = {t:.4f} (center slice)')
@@ -722,8 +722,7 @@ def plot_method_comparison(scenario_name, schema_dict, output_path):
                 #             norm=colors.LogNorm(vmin=max(global_min_err, 1e-16), 
                 #                                vmax=global_max_err))
                 
-                im = ax.imshow(error.T, origin='lower', cmap='inferno', 
-                               vmin = 0, vmax=global_max_err)
+                im = ax.imshow(error.T, origin='lower', cmap='inferno')
                 
                 ax.set_title(f"Error: {schema_name}\nMax: {np.max(error):.2e}")
                 ax.set_xlabel("x")

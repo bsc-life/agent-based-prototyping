@@ -363,6 +363,98 @@ def single_tumor():
     
     return results, summary
 
+def single_tumor_on_off():
+
+    print("\n" + "=" * 70)
+    print("Single Tumor 2D On-Off Benchmarking")
+    print("=" * 70)
+
+    base_scenario = get_scenario_by_name('single_tumor_2d')
+    store = True
+    base_scenario["store_history"] = store
+    base_scenario["t_final"] = 10
+    base_scenario["bulk"]["regions"][0]["linear_rate"] = lambda t: 0.0 if int(np.floor(t + 1e-10)) % 2 == 0 else -10.0
+    base_scenario["golden_solution"]["dt_ref"] = 0.01
+    base_scenario["golden_solution"]["schema_class"] = CrankNicolsonBCSchema
+
+    dt_values = [0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.01]
+    scenarios = []
+    
+    for dt in dt_values:
+        scenario = copy.deepcopy(base_scenario)
+        scenario["dt"] = dt
+        scenario["name"] = f"single_tumor_2d_dt{dt}".replace(".", "")
+        scenarios.append(scenario)
+    
+    runner = BenchmarkRunner()
+    # runner.add_schema(ExplicitEulerBCSchema, "Explicit Euler")
+    runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
+    runner.add_schema(ImplicitLODBCSchema, "Implicit LOD")
+    runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
+    runner.add_schema(CrankNicolsonLODBCSchema, "Crank-Nicolson LOD")
+    runner.add_schema(ADIBCSchema, "ADI")
+    
+    for scenario in scenarios:
+        runner.add_scenario(scenario)
+    
+    results = runner.run(
+        output_dir='benchmark_results/single_tumor_on_off',
+        store_history=store,
+        generate_plots=True
+    )
+    
+    summary = runner.generate_summary_report(
+        output_path='benchmark_results/single_tumor_on_off/summary_dt_dx20_t10_2.csv'
+    )
+    
+    return results, summary
+
+def single_tumor_gradual():
+
+    print("\n" + "=" * 70)
+    print("Single Tumor 2D Gradual Benchmarking")
+    print("=" * 70)
+
+    base_scenario = get_scenario_by_name('single_tumor_2d')
+    store = True
+    base_scenario["store_history"] = store
+    base_scenario["t_final"] = 10
+    base_scenario["bulk"]["regions"][0]["linear_rate"] = lambda t: - 2 * (np.abs(t - 5))
+    base_scenario["golden_solution"]["dt_ref"] = 0.01
+    base_scenario["golden_solution"]["schema_class"] = CrankNicolsonBCSchema
+
+    dt_values = [0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.01]
+    scenarios = []
+    
+    for dt in dt_values:
+        scenario = copy.deepcopy(base_scenario)
+        scenario["dt"] = dt
+        scenario["name"] = f"single_tumor_2d_dt{dt}".replace(".", "")
+        scenarios.append(scenario)
+    
+    runner = BenchmarkRunner()
+    # runner.add_schema(ExplicitEulerBCSchema, "Explicit Euler")
+    runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
+    runner.add_schema(ImplicitLODBCSchema, "Implicit LOD")
+    runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
+    runner.add_schema(CrankNicolsonLODBCSchema, "Crank-Nicolson LOD")
+    runner.add_schema(ADIBCSchema, "ADI")
+    
+    for scenario in scenarios:
+        runner.add_scenario(scenario)
+    
+    results = runner.run(
+        output_dir='benchmark_results/single_tumor_gradual',
+        store_history=store,
+        generate_plots=True
+    )
+    
+    summary = runner.generate_summary_report(
+        output_path='benchmark_results/single_tumor_gradual/summary_dt_dx20_t10_2.csv'
+    )
+    
+    return results, summary
+
 def multiple_tumor():
 
     print("\n" + "=" * 70)
@@ -437,8 +529,8 @@ def multiple_tumor():
 
 def main():
 
-    results, summary = single_tumour()
-    # results, summary = multiple_tumour()
+    results, summary = single_tumor()
+    # results, summary = multiple_tumor()
 
 if __name__ == "__main__":
     main()

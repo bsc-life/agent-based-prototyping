@@ -65,7 +65,8 @@ class NumericalReferenceSolution(GoldenSolution):
         self.interpolator = RegularGridInterpolator(
             points=interpolator_points, # list of high-resolution 1D-arrays [time_array, x_array, y_array, ...]
             values=reference_history_array, # actual high-resolution data cube, at each time step for each point
-            bounds_error=True
+            bounds_error=False,
+            fill_value=None
         )
 
     def evaluate(self, coordinates: Union[np.ndarray, Tuple[np.ndarray, ...]], t: float) -> np.ndarray:
@@ -199,7 +200,7 @@ def create_numerical_reference(
 
     # print(f"Running {schema.__class__.__name__} high-resolution reference simulation with dx={dx_ref}, dt={dt_ref} for t_final={t_final}...")
     # Run simulation to t_final AND capture the history list
-    history_list, time_array = schema.solve(t_final, store_history=store_history)
+    history_list, time_array = schema.solve(t_final, store_history=store_history, progress=True)
     
     # Convert the list of arrays into a single stacked numpy array
     history_array = np.stack(history_list)
