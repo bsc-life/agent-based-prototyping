@@ -343,7 +343,7 @@ class Schema(ABC):
 
         return history, times
     
-    def _compute_source_term(self) -> np.ndarray:
+    def _compute_source_term(self, state = None) -> np.ndarray:
         """
         Compute the source term from all agents and bulk regions.
         
@@ -352,25 +352,24 @@ class Schema(ABC):
         np.ndarray
             Source term array with same shape as state.
         """
+        if state is None:
+            state = self.state
+
         if not self._agents and not self._bulk:
-            return np.zeros_like(self.state)
+            return np.zeros_like(state)
         
-        source = np.zeros_like(self.state)
+        source = np.zeros_like(state)
         coords = self._create_coordinate_grids()
         
         for agent in self._agents:
-            # if isinstance(agent, CompleteAgent):
-            #     source += agent.compute_source(self.state, coords, self.dx, self.t)
-            # else:
-            #     source += agent.compute_source(coords, self.dx, self.t)
-            source += agent.compute_source(self.state, coords, self.dx, self.dt, self.t)
+            source += agent.compute_source(state, coords, self.dx, self.dt, self.t)
         
         if self._bulk is not None:
             # there is no need to iterate here, as self._bulk is an object itself
             # and self._bulk.compute_source already computes the contribution from the whole bulk region
             # by iterating internally over its region list (or bulk in self._bulk)
             # pass the self.state in order to avoid going below 0
-            source += self._bulk.compute_source(self.state, coords, self.dx, self.dt, self.t)
+            source += self._bulk.compute_source(state, coords, self.dx, self.dt, self.t)
 
         return source
     
