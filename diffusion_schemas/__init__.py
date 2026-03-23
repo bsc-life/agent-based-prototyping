@@ -17,6 +17,7 @@ from diffusion_schemas.methods_BC.crank_nicolson import CrankNicolsonBCSchema
 from diffusion_schemas.methods_BC.implicit_LOD import ImplicitLODBCSchema
 from diffusion_schemas.methods_BC.crank_nicolson_LOD import CrankNicolsonLODBCSchema
 from diffusion_schemas.methods_BC.ADI import ADIBCSchema
+from diffusion_schemas.methods_BC_I.ADI import ADIBCISchema
 
 
 __version__ = "0.1.0"
@@ -34,5 +35,7 @@ __all__ = [
     "CrankNicolsonBCSchema",
     "ImplicitLODBCSchema",
     "CrankNicolsonLODBCSchema",
-    "ADIBCSchema"
+    "ADIBCSchema",
+
+    "ADIBCISchema"
 ]

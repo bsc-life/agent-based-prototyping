@@ -432,6 +432,7 @@ class Bulk:
             Region to add.
         """
         self._regions.append(region)
+        self._precomputed = False
 
     def remove_region(self, name: str) -> None:
         """
@@ -504,17 +505,7 @@ class Bulk:
         self._precompute_rates(coords, dx, t)
         source = (self._net_cached_rates + 
                   field * self._linear_cached_rates - 
-                  field * self._target_cached_rates - self._target_cached_bias)
-
-        # Implementation of cached target rates and biases makes us not need this part
-        # for region in self._regions:
-        #     if isinstance(region, TargetRegion):
-        #         rate = region.get_linear_rate(t)
-        #         rho_target = region.get_rho_target(t)
-        #         if rate == 0.0:
-        #             continue
-        #         overlap = region.domain.rasterize(coords, dx)
-        #         source += overlap * rate * (rho_target - field)
+                  field * self._target_cached_rates + self._target_cached_bias)
 
         # Negative fields problem (revisit this logic)
         # If there exists any negative values
@@ -522,13 +513,23 @@ class Bulk:
         idx = (source * dt < -field) & (source < 0.0)
         source[idx] = -field[idx] / dt
 
-        # NOTE 
+        # NOTE
         # Not adding division of rate by grid volume as in Agent implementation
         # Each voxel already receives a fraction of the total rate based on the overlap, so no need to divide by voxel volume here. The net_rate is effectively a per-voxel contribution already after multiplying by the overlap fraction.
         # Rate is already given by unit volume 
 
         return source
     
+    def compute_source_implicit(self, coords, dx, t) -> None:
+
+        self._precompute_rates(coords, dx, t)  # precompute rates at the next time step for implicit contribution
+        self.rhs_contribution = np.zeros_like(coords[0])
+        self.lhs_contribution = np.zeros_like(coords[0])    
+
+        # Cached arrays are already sums over all regions.
+        self.rhs_contribution = self._net_cached_rates + self._target_cached_bias
+        self.lhs_contribution = self._target_cached_rates - self._linear_cached_rates
+
     def _precompute_rates(self, coords, dx, t) -> None:
         """
         Precompute net rates for all regions at the current time step.
@@ -569,6 +570,7 @@ class Bulk:
                 self._linear_cached_rates += region.domain.rasterize(coords, dx) * region.get_linear_rate(t)
             elif isinstance(region, NetRegion): 
                 self._net_cached_rates += region.domain.rasterize(coords, dx) * region.get_net_rate(t)
+
 
     def __repr__(self) -> str:
         return f"Bulk(n_regions={len(self._regions)})"
