@@ -233,7 +233,7 @@ class CrankNicolsonBCISchema(Schema):
                 rhs = self._apply_neumann_bc(rhs)
 
         # Solve the linear system
-        u_new_flat = spsolve(system_matrix, rhs)
+        u_new_flat = spsolve(system_matrix.tocsr(), rhs)
         
         # Reshape to grid
         self.state = u_new_flat.reshape(self.grid_points)

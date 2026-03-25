@@ -169,7 +169,7 @@ class ImplicitLODBCISchema(Schema):
             source_lhs[self._boundary_mask] = 0.0
 
         # Right-hand side: u^n + dt*(S_explicit + S_rhs)
-        rhs = self.state.flatten() + self.dt * (source_explicit.flatten() + source_rhs.flatten())
+        rhs = self.state.flatten()
         
         # --------------------- 1D CASE ---------------------
         if self.ndim == 1:
@@ -196,7 +196,7 @@ class ImplicitLODBCISchema(Schema):
             u_star = np.zeros((Nx, Ny))
             for j in range(Ny):
                 # Create modified LHS with diagonal source term
-                source_diag = diags([self.dt * source_lhs[:, j]], [0], shape=(Nx, Nx), format='csr')
+                source_diag = diags([(self.dt / 2.0) * source_lhs[:, j]], [0], shape=(Nx, Nx), format='csr')
                 Ax_j = (Ax + source_diag).tolil()
                 
                 # Extract RHS for this column
@@ -213,7 +213,7 @@ class ImplicitLODBCISchema(Schema):
             u_new = np.zeros((Nx, Ny))
             for i in range(Nx):
                 # Create modified LHS with diagonal source term
-                source_diag = diags([self.dt * source_lhs[i, :]], [0], shape=(Ny, Ny), format='csr')
+                source_diag = diags([(self.dt / 2.0) * source_lhs[i, :]], [0], shape=(Ny, Ny), format='csr')
                 Ay_i = (Ay + source_diag).tolil()
                 
                 # Extract RHS for this row (as column vector)
@@ -240,7 +240,7 @@ class ImplicitLODBCISchema(Schema):
             for j in range(Ny):
                 for k in range(Nz):
                     # Create modified LHS with diagonal source term
-                    source_diag = diags([self.dt * source_lhs[:, j, k]], [0], shape=(Nx, Nx), format='csr')
+                    source_diag = diags([(self.dt / 3.0) * source_lhs[:, j, k]], [0], shape=(Nx, Nx), format='csr')
                     Ax_jk = (Ax + source_diag).tolil()
                     
                     # Extract RHS for this line
@@ -259,7 +259,7 @@ class ImplicitLODBCISchema(Schema):
             for i in range(Nx):
                 for k in range(Nz):
                     # Create modified LHS with diagonal source term
-                    source_diag = diags([self.dt * source_lhs[i, :, k]], [0], shape=(Ny, Ny), format='csr')
+                    source_diag = diags([(self.dt / 3.0) * source_lhs[i, :, k]], [0], shape=(Ny, Ny), format='csr')
                     Ay_ik = (Ay + source_diag).tolil()
                     
                     # Extract RHS for this line
@@ -278,7 +278,7 @@ class ImplicitLODBCISchema(Schema):
             for i in range(Nx):
                 for j in range(Ny):
                     # Create modified LHS with diagonal source term
-                    source_diag = diags([self.dt * source_lhs[i, j, :]], [0], shape=(Nz, Nz), format='csr')
+                    source_diag = diags([(self.dt / 3.0) * source_lhs[i, j, :]], [0], shape=(Nz, Nz), format='csr')
                     Az_ij = (Az + source_diag).tolil()
                     
                     # Extract RHS for this line
