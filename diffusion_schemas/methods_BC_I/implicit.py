@@ -188,14 +188,13 @@ class ImplicitEulerBCISchema(Schema):
         rhs = self.state.flatten() + self.dt * (source_explicit.flatten() + source_rhs.flatten())
 
         # Effective system matrix: A + dt*diag(S_lhs)
-        system_matrix = self.system_matrix.tolil(copy=True)
         if self._bulk is not None:
             lhs = source_lhs.ravel().copy()
 
             # Preserve BC-imposed rows by not changing boundary diagonal entries.
             lhs[self._boundary_idx] = 0.0
 
-            system_matrix.setdiag(system_matrix.diagonal() + self.dt * lhs)
+            system_matrix = self.system_matrix + diags(self.dt * lhs, 0, format='csr')
 
         # Apply boundary conditions directly to the system if needed
         if isinstance(self._boundary_conditions, DirichletBC):
@@ -204,7 +203,7 @@ class ImplicitEulerBCISchema(Schema):
             rhs, _ = self._apply_neumann_bc(rhs)
 
         # Solve the linear system: A * u^(n+1) = rhs
-        u_new_flat = spsolve(system_matrix.tocsr(), rhs)
+        u_new_flat = spsolve(system_matrix, rhs)
         
         # Reshape to grid
         self.state = u_new_flat.reshape(self.grid_points)
