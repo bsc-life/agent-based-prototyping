@@ -17,6 +17,10 @@ from diffusion_schemas.methods_BC.crank_nicolson import CrankNicolsonBCSchema
 from diffusion_schemas.methods_BC.implicit_LOD import ImplicitLODBCSchema
 from diffusion_schemas.methods_BC.crank_nicolson_LOD import CrankNicolsonLODBCSchema
 from diffusion_schemas.methods_BC.ADI import ADIBCSchema
+from diffusion_schemas.methods_BC_I.implicit import ImplicitEulerBCISchema
+from diffusion_schemas.methods_BC_I.crank_nicolson import CrankNicolsonBCISchema
+from diffusion_schemas.methods_BC_I.implicit_LOD import ImplicitLODBCISchema
+from diffusion_schemas.methods_BC_I.crank_nicolson_LOD import CrankNicolsonLODBCISchema
 from diffusion_schemas.methods_BC_I.ADI import ADIBCISchema
 
 
@@ -37,5 +41,9 @@ __all__ = [
     "CrankNicolsonLODBCSchema",
     "ADIBCSchema",
 
+    "ImplicitEulerBCISchema",
+    "CrankNicolsonBCISchema",
+    "ImplicitLODBCISchema",
+    "CrankNicolsonLODBCISchema",
     "ADIBCISchema"
 ]

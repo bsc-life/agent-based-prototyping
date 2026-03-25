@@ -22,9 +22,11 @@ from benchmarking import (
 # Schema imports
 from diffusion_schemas import (
     ExplicitEulerSchema, ImplicitEulerSchema, CrankNicolsonSchema,
-    ImplicitLODSchema, CrankNicolsonLODSchema,
+    ImplicitLODSchema, CrankNicolsonLODSchema, ADIBCSchema,
     ExplicitEulerBCSchema, ImplicitEulerBCSchema, CrankNicolsonBCSchema,
-    ImplicitLODBCSchema, CrankNicolsonLODBCSchema, ADIBCSchema
+    ImplicitLODBCSchema, CrankNicolsonLODBCSchema, ADIBCSchema,
+    ImplicitEulerBCISchema, CrankNicolsonBCISchema,
+    ImplicitLODBCISchema, CrankNicolsonLODBCISchema, ADIBCISchema
 )
 
 # Utilities for backward compatibility example
@@ -331,7 +333,9 @@ def single_tumor():
     base_scenario["store_history"] = store
     base_scenario["t_final"] = 10
 
-    dt_values = [0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.01]
+    base_scenario["bulk"]["regions"][0]["linear_rate"] = base_scenario["bulk"]["regions"][0].pop("net_rate")
+
+    dt_values = [0.5, 0.1]
     scenarios = []
     
     for dt in dt_values:
@@ -343,10 +347,16 @@ def single_tumor():
     runner = BenchmarkRunner()
     # runner.add_schema(ExplicitEulerBCSchema, "Explicit Euler")
     runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
+    runner.add_schema(ImplicitEulerBCISchema, "Implicit Euler with Implicit Source")
     runner.add_schema(ImplicitLODBCSchema, "Implicit LOD")
+    runner.add_schema(ImplicitLODBCISchema, "Implicit LOD with Implicit Source")
     runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
+    runner.add_schema(CrankNicolsonBCISchema, "Crank-Nicolson with Implicit Source")
     runner.add_schema(CrankNicolsonLODBCSchema, "Crank-Nicolson LOD")
+    runner.add_schema(CrankNicolsonLODBCISchema, "Crank-Nicolson LOD with Implicit Source")
     runner.add_schema(ADIBCSchema, "ADI")
+    runner.add_schema(ADIBCISchema, "ADI with Implicit Source")
+
     
     for scenario in scenarios:
         runner.add_scenario(scenario)
@@ -358,7 +368,7 @@ def single_tumor():
     )
     
     summary = runner.generate_summary_report(
-        output_path='benchmark_results/single_tumor/summary_dt_dx20_t10_2.csv'
+        output_path='benchmark_results/single_tumor/summary.csv'
     )
     
     return results, summary
@@ -530,7 +540,6 @@ def multiple_tumor():
 def main():
 
     results, summary = single_tumor()
-    # results, summary = multiple_tumor()
 
 if __name__ == "__main__":
     main()

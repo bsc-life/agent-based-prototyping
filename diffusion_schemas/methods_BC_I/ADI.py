@@ -30,7 +30,32 @@ class ADIBCISchema(Schema):
     ):
         super().__init__(domain_size, grid_points, dt, diffusion_coefficient, decay_rate)
         self._build_system_matrix()
-    
+        self._boundary_mask = self._compute_boundary_indices()
+
+    def _compute_boundary_indices(self) -> np.ndarray:
+        """Precompute flattened boundary indices for the current grid shape."""
+        mask = np.zeros(self.grid_points, dtype=bool)
+
+        # First/last plane in x
+        mask[0, ...] = True
+        mask[-1, ...] = True
+
+        if self.ndim >= 2:
+            # First/last plane in y
+            mask[:, 0, ...] = True
+            mask[:, -1, ...] = True
+
+        if self.ndim == 3:
+            # First/last plane in z
+            mask[:, :, 0] = True
+            mask[:, :, -1] = True
+
+        # ravel makes a 1D view 
+        # flatnonzero returns integer positions where value is True
+        # this can be used to index into flattened arrays 
+        # return np.flatnonzero(mask.ravel())
+        return mask
+
     def _build_system_matrix(self) -> None:
         if self.ndim == 1:
             self.system_matrix = self._build_matrix_1d()
@@ -153,6 +178,9 @@ class ADIBCISchema(Schema):
             Nx, Ny = self.grid_points
 
             LHS_x, RHS_x, LHS_y, RHS_y = self.system_matrix
+
+            # --- SWEEP 1: Implicit X, Explicit Y (with implicit source) ---
+
             # Returns explicit agent source; bulk implicit split is cached in self._bulk.
             source_explicit = self._compute_source_term(implicit = True, t = t_mid)
             source_rhs = np.zeros_like(self.state)
@@ -161,7 +189,9 @@ class ADIBCISchema(Schema):
                 source_rhs = self._bulk.rhs_contribution
                 source_lhs = self._bulk.lhs_contribution
 
-            # --- SWEEP 1: Implicit X, Explicit Y (with implicit source) ---
+                # Ignore boundary values for the implicit source term since they will be overwritten by BC enforcement
+                source_lhs[self._boundary_mask] = 0.0
+
             rhs_1 = (RHS_y @ self.state.T).T + dt_half * (source_rhs + source_explicit)
 
             # Add explicit transverse Neumann forcing (y-direction)
@@ -200,6 +230,7 @@ class ADIBCISchema(Schema):
             if self._bulk is not None:  
                 source_rhs = self._bulk.rhs_contribution
                 source_lhs = self._bulk.lhs_contribution
+                source_lhs[self._boundary_mask] = 0.0
             rhs_2 = (RHS_x @ u_star) + dt_half * (source_rhs + source_explicit)
 
             # Add explicit transverse Neumann forcing (x-direction)
@@ -234,8 +265,6 @@ class ADIBCISchema(Schema):
             self.state = u_new
             self.t += self.dt
 
-
-
     def _apply_bc_to_sweep(self, matrix, rhs_array: np.ndarray, h: float, dt_sweep: float) -> np.ndarray:
         if self._boundary_conditions is None:
             return rhs_array
@@ -263,14 +292,7 @@ class ADIBCISchema(Schema):
             
             matrix[-1, :] = 0
             matrix[-1, -1] = 1
-            rhs_array[-1, :] = val
-
-            # ADI BC implementation fix
-            # matrix[:, 0] = 0
-            # matrix[:, -1] = 0
-            # rhs_array[:, 0] = val
-            # rhs_array[:, -1] = val
-            
+            rhs_array[-1, :] = val            
         return rhs_array
 
     def set_diffusion_coefficient(self, value: float) -> None:
