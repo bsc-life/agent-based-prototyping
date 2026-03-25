@@ -169,7 +169,7 @@ class ImplicitLODBCISchema(Schema):
             source_lhs[self._boundary_mask] = 0.0
 
         # Right-hand side: u^n + dt*(S_explicit + S_rhs)
-        rhs = self.state.flatten()
+        rhs = self.state.flatten() + self.dt * (source_explicit + source_rhs)
         
         # --------------------- 1D CASE ---------------------
         if self.ndim == 1:
