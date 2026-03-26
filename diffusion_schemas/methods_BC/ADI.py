@@ -153,8 +153,7 @@ class ADIBCSchema(Schema):
             rhs = self._apply_bc_to_sweep(Ax, rhs, self.dx[0], self.dt)
             self.state = spsolve(Ax.tocsr(), rhs).reshape(self.grid_points)
 
-        # HUGE CHANGE: 2D ADI SPLIT INTO TWO SWEEPS WITH HALF SOURCE TERM IN EACH
-        # --------------------- 2D CASE (Peaceman-Rachford) ---------------------
+        # --------------------- 2D CASE (Peaceman-Rachford WITH IMPLICIT SOURCE) ---------------------
         elif self.ndim == 2:
             dt_half = self.dt / 2.0
             D = self.diffusion_coefficient

@@ -222,7 +222,7 @@ class CrankNicolsonBCISchema(Schema):
         # --- IMPLICIT PART (LHS Construction & Solve) ---
 
         # Effective system matrix: A + theta * dt * diag(S_lhs)
-        system_matrix = self.A_impl + diags(self.dt * lhs, 0, format='csr')
+        system_matrix = self.A_impl + diags(self.theta * self.dt * lhs, 0, format='csr')
 
         # Apply boundary conditions to rhs
         if self._boundary_conditions is not None:

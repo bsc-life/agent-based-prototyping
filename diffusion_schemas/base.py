@@ -362,9 +362,11 @@ class Schema(ABC):
         eval_t = self.t if t is None else t
         coords = self._create_coordinate_grids()
         
+        # for now, we will keep agents evaluated at self.t so that they are only explicit
         for agent in self._agents:
-            source += agent.compute_source(state, coords, self.dx, self.dt, eval_t)
-        
+            # source += agent.compute_source(state, coords, self.dx, self.dt, eval_t)
+            source += agent.compute_source(state, coords, self.dx, self.dt, self.t)
+
         if self._bulk is not None:
             # there is no need to iterate here, as self._bulk is an object itself
             # and self._bulk.compute_source already computes the contribution from the whole bulk region
