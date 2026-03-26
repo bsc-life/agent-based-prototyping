@@ -239,7 +239,7 @@ class CrankNicolsonLODBCISchema(Schema):
 
             u_star = np.zeros((Nx, Ny))
             for j in range(Ny):
-                source_diag = diags([self.theta * (self.dt / 2.0) * bulk_lhs_np1[:, j]], [0], shape=(Nx, Nx), format='csr')
+                source_diag = diags([(self.theta * self.dt / 2.0) * bulk_lhs_np1[:, j]], [0], shape=(Nx, Nx), format='csr')
                 Ax_j = (Ax + source_diag).tolil()
 
                 rhs_j = rhs[:, j].reshape(Nx, 1)
@@ -248,7 +248,7 @@ class CrankNicolsonLODBCISchema(Schema):
 
             u_new = np.zeros((Nx, Ny))
             for i in range(Nx):
-                source_diag = diags([self.theta * (self.dt / 2.0) * bulk_lhs_np1[i, :]], [0], shape=(Ny, Ny), format='csr')
+                source_diag = diags([(self.theta * self.dt / 2.0) * bulk_lhs_np1[i, :]], [0], shape=(Ny, Ny), format='csr')
                 Ay_i = (Ay + source_diag).tolil()
 
                 rhs_i = u_star[i, :].reshape(Ny, 1)
@@ -267,7 +267,7 @@ class CrankNicolsonLODBCISchema(Schema):
             u_star = np.zeros((Nx, Ny, Nz))
             for j in range(Ny):
                 for k in range(Nz):
-                    source_diag = diags([self.theta * (self.dt / 3.0) * bulk_lhs_np1[:, j, k]], [0], shape=(Nx, Nx), format='csr')
+                    source_diag = diags([(self.theta * self.dt / 3.0) * bulk_lhs_np1[:, j, k]], [0], shape=(Nx, Nx), format='csr')
                     Ax_jk = (Ax + source_diag).tolil()
 
                     rhs_jk = rhs[:, j, k].reshape(Nx, 1)
@@ -277,7 +277,7 @@ class CrankNicolsonLODBCISchema(Schema):
             u_star_star = np.zeros((Nx, Ny, Nz))
             for i in range(Nx):
                 for k in range(Nz):
-                    source_diag = diags([self.theta * (self.dt / 3.0) * bulk_lhs_np1[i, :, k]], [0], shape=(Ny, Ny), format='csr')
+                    source_diag = diags([(self.theta * self.dt / 3.0) * bulk_lhs_np1[i, :, k]], [0], shape=(Ny, Ny), format='csr')
                     Ay_ik = (Ay + source_diag).tolil()
 
                     rhs_ik = u_star[i, :, k].reshape(Ny, 1)
@@ -287,7 +287,7 @@ class CrankNicolsonLODBCISchema(Schema):
             u_new = np.zeros((Nx, Ny, Nz))
             for i in range(Nx):
                 for j in range(Ny):
-                    source_diag = diags([self.theta * (self.dt / 3.0) * bulk_lhs_np1[i, j, :]], [0], shape=(Nz, Nz), format='csr')
+                    source_diag = diags([(self.theta * self.dt / 3.0) * bulk_lhs_np1[i, j, :]], [0], shape=(Nz, Nz), format='csr')
                     Az_ij = (Az + source_diag).tolil()
 
                     rhs_ij = u_star_star[i, j, :].reshape(Nz, 1)
