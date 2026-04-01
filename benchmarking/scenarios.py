@@ -9,6 +9,7 @@ the analytical solution for validation.
 
 import numpy as np
 from typing import Dict, Any, List, Union, Tuple, Callable
+from diffusion_schemas.methods_BC_I.implicit import ImplicitEulerBCISchema
 from diffusion_schemas.utils.initial_conditions import gaussian, uniform, step_function, checkerboard, sphere, sine
 from diffusion_schemas.utils.boundary import (
     DirichletBC, NeumannBC, PeriodicBC, RobinBC, BoundaryCondition
@@ -20,6 +21,7 @@ from benchmarking.golden_solutions import (
     create_golden_solution_from_dict,
     create_numerical_reference_cached
 )
+from diffusion_schemas import (ImplicitEulerBCISchema)
 
 # ==============================================================================
 # Functions to build
@@ -957,10 +959,10 @@ SINE_DECAY_1D = {
 COSINE_DIFFUSION_1D = {
     # BioFVM convergence test 1: 1D diffusion with cosine initial condition and zero-flux boundaries
     'name': 'cosine_diffusion_1d',
-    'description': 'First convergence test',
+    'description': '1-D diffusion with analytical solution (BioFVM convergence test 1)',
     
-    'domain_size': 1000,
-    'grid_points': int(1000 / 5),
+    'domain_size': 1000, # L0 = 500 um
+    'grid_points': int(1000 / 5), # dx = 5 um
     'dt': 0.00001,
     't_final': 2,
     
@@ -1012,6 +1014,171 @@ COSINE_DIFFUSION_2D = {
         (1.0 + np.cos(np.pi * (np.asarray(x)-500) / 500) * np.exp(- np.pi**2 * 1e5 / 500**2 * t)) *
         (1.0 + np.cos(np.pi * (np.asarray(y)-500) / 500) * np.exp(- np.pi**2 * 1e5 / 500**2 * t))
     )
+}
+
+# ==============================================================================
+# BioFVM CONVERGENCE TESTS
+# ==============================================================================
+
+CONVERGENCE_TEST_2 = {
+    'name': 'convergence_test_2',
+    'description': '3-D diffusion-reaction with bulk sources (BioFVM convergence test 2)',
+    
+    # Domain is [-500, 500]^3, translated here to [0, 1000]^3 for positive coordinates
+    'domain_size': (1000.0, 1000.0, 1000.0),
+    'grid_points': (int(1000.0/10), int(1000.0/10), int(1000.0/10)), # Medium resolution dx = 20 μm [cite: 538]
+    'dt': 0.01, # Example testing dt
+    't_final': 4.0, # Simulated 4 minutes of diffusion 
+    
+    'diffusion_coefficient': 1e5, # D = 10^5 μm^2/min
+    'decay_rate': 0.1, # λ = 0.1 min^-1 
+    
+    'initial_condition': {
+        'type': 'uniform',
+        'value': 38.0 # Typical starting point, bounded by saturation density ρ* = 38 mmHg 
+    },
+    
+    'boundary_condition': {
+        'type': 'neumann',
+        'value': 0.0 # D∇ρ·n = 0
+    },
+    
+    'bulk': {
+        'regions': [
+            # X-faces (Full Y and Z spans)
+            {
+                'type': 'rectangle',
+                'origin': (0.0, 0.0, 0.0),
+                'size': (40.0, 1000.0, 1000.0),
+                'linear_rate': 38.0,
+                'rho_target': 38.0,
+                'name': 'x_min_boundary'
+            },
+            {
+                'type': 'rectangle',
+                'origin': (960.0, 0.0, 0.0),
+                'size': (40.0, 1000.0, 1000.0),
+                'linear_rate': 38.0,
+                'rho_target': 38.0,
+                'name': 'x_max_boundary'
+            },
+            # Y-faces (Restricted X span to avoid overlapping with X-faces)
+            {
+                'type': 'rectangle',
+                'origin': (40.0, 0.0, 0.0),
+                'size': (920.0, 40.0, 1000.0),
+                'linear_rate': 38.0,
+                'rho_target': 38.0,
+                'name': 'y_min_boundary'
+            },
+            {
+                'type': 'rectangle',
+                'origin': (40.0, 960.0, 0.0),
+                'size': (920.0, 40.0, 1000.0),
+                'linear_rate': 38.0,
+                'rho_target': 38.0,
+                'name': 'y_max_boundary'
+            },
+            # Z-faces (Restricted X and Y spans to avoid overlapping with X and Y faces)
+            {
+                'type': 'rectangle',
+                'origin': (40.0, 40.0, 0.0),
+                'size': (920.0, 920.0, 40.0),
+                'linear_rate': 38.0,
+                'rho_target': 38.0,
+                'name': 'z_min_boundary'
+            },
+            {
+                'type': 'rectangle',
+                'origin': (40.0, 40.0, 960.0),
+                'size': (920.0, 920.0, 40.0),
+                'linear_rate': 38.0,
+                'rho_target': 38.0,
+                'name': 'z_max_boundary'
+            }
+        ]
+    },
+    
+    # No analytical solution for this example
+    'golden_solution': {
+        'type': 'numerical_reference',
+        'schema_class': ImplicitEulerBCISchema, 
+        'dx_ref': 10.0, # High/fine spatial resolution for reference 
+        'dt_ref': 0.0001 # Fine time resolution for reference 
+    },
+
+    'store_history': False
+}
+
+
+cell_centers = []
+tumor_center = np.array([500.0, 500.0, 500.0])
+tumor_radius = 400.0 
+# Grid aligned cells every 10 um (e.g., 5, 15, ..., 995)
+coords = np.arange(5.0, 1000.0, 10.0)
+for x in coords:
+    for y in coords:
+        for z in coords:
+            pos = np.array([x, y, z])
+            if np.linalg.norm(pos - tumor_center) <= tumor_radius:
+                cell_centers.append((x, y, z))
+# Cell radius derived from volume W_k = 1000 um^3 
+cell_radius = (1000.0 * 0.75 / np.pi)**(1/3) 
+cell_regions = [
+    {
+        'type': 'sphere',
+        'center': pos,
+        'radius': cell_radius,
+        # Uptake rate U_k = 10 min^-1  
+        # (Negative linear_rate acts as -U_k * rho in your compute_source method)
+        'linear_rate': -10.0, 
+        'name': f'cell_{i}'
+    }
+    for i, pos in enumerate(cell_centers)
+]
+boundary_regions = [
+    {'type': 'rectangle', 'origin': (0.0, 0.0, 0.0), 'size': (40.0, 1000.0, 1000.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'x_min_boundary'},
+    {'type': 'rectangle', 'origin': (960.0, 0.0, 0.0), 'size': (40.0, 1000.0, 1000.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'x_max_boundary'},
+    {'type': 'rectangle', 'origin': (40.0, 0.0, 0.0), 'size': (920.0, 40.0, 1000.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'y_min_boundary'},
+    {'type': 'rectangle', 'origin': (40.0, 960.0, 0.0), 'size': (920.0, 40.0, 1000.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'y_max_boundary'},
+    {'type': 'rectangle', 'origin': (40.0, 40.0, 0.0), 'size': (920.0, 920.0, 40.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'z_min_boundary'},
+    {'type': 'rectangle', 'origin': (40.0, 40.0, 960.0), 'size': (920.0, 920.0, 40.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'z_max_boundary'}
+]
+
+CONVERGENCE_TEST_3 = {
+    'name': 'convergence_test_3',
+    'description': '3-D diffusion-reaction with bulk sources and grid-aligned cell uptake (BioFVM convergence test 3)',
+    
+    'domain_size': (1000.0, 1000.0, 1000.0),
+    'grid_points': (int(1000.0/20), int(1000.0/20), int(1000.0/20)),
+    'dt': 0.01,
+    't_final': 4.0,
+    
+    'diffusion_coefficient': 1e5,
+    'decay_rate': 0.1,
+    
+    'initial_condition': {
+        'type': 'uniform',
+        'value': 38.0
+    },
+    
+    'boundary_condition': {
+        'type': 'neumann',
+        'value': 0.0
+    },
+    
+    'bulk': {
+        'regions': boundary_regions + cell_regions
+    },
+    
+    'golden_solution': {
+        'type': 'numerical_reference',
+        'schema_class': None,
+        'dx_ref': 10.0,
+        'dt_ref': 0.0001
+    },
+
+    'store_history': False
 }
 
 # ==============================================================================
@@ -1122,6 +1289,96 @@ MULTIPLE_TUMOR_2D = {
     'store_history': False # Don't store history for this one to save memory, since the reference solution is large and we only care about final state
 }
 
+def generate_tumor_regions_by_density(
+    density: float,
+    domain_size: Union[float, Tuple[float, ...]],
+    grid_points: Union[int, Tuple[int, ...]],
+    tumor_radius: float,
+    uptake_linear_rate: float = -10.0,
+    secretion_linear_rate: float = 10.0,
+    secretion_target_density: float = 38.0,
+    secreting_fraction: float = 0.5,
+    seed: int = 20,
+    min_tumors: int = 0,
+) -> List[Dict[str, Any]]:
+    """
+    Generate random tumor bulk regions from density for 1D/2D/3D scenarios.
+
+    Density units are inferred from dimension (taken from grid_points length):
+    - 1D: tumors per mm
+    - 2D: tumors per mm^2
+    - 3D: tumors per mm^3
+
+        Domain coordinates are assumed to be in micrometers, so conversion uses
+        1 mm = 1000 um.
+
+        Bulk model mapping used by this helper:
+        - Uptaking tumors are emitted as LinearRegion specs (linear_rate only).
+        - Secreting tumors are emitted as TargetRegion specs
+            (linear_rate + rho_target).
+    """
+    if density < 0:
+        raise ValueError("density must be non-negative")
+    if not 0.0 <= secreting_fraction <= 1.0:
+        raise ValueError("secreting_fraction must be in [0, 1]")
+    if min_tumors < 0:
+        raise ValueError("min_tumors must be non-negative")
+
+    if np.isscalar(grid_points):
+        dim = 1
+    else:
+        dim = len(tuple(grid_points))
+
+    if np.isscalar(domain_size):
+        if dim != 1:
+            raise ValueError("domain_size must be a tuple for 2D/3D scenarios")
+        domain_dims = (float(domain_size),)
+    else:
+        domain_dims = tuple(float(v) for v in domain_size)
+        if len(domain_dims) != dim:
+            raise ValueError("domain_size and grid_points dimensions do not match")
+
+    margin = float(tumor_radius)
+    for size in domain_dims:
+        if size <= 2.0 * margin:
+            raise ValueError("Each domain dimension must be larger than 2 * tumor_radius")
+
+    measure_um_dim = float(np.prod(domain_dims))
+    measure_mm_dim = measure_um_dim / (1000.0 ** dim)
+
+    n_tumors = int(round(density * measure_mm_dim))
+    n_tumors = max(min_tumors, n_tumors)
+    n_secreting = int(round(n_tumors * secreting_fraction))
+    n_uptake = n_tumors - n_secreting
+
+    rng = np.random.default_rng(seed)
+    coords_by_axis = [
+        rng.uniform(margin, size - margin, size=n_tumors)
+        for size in domain_dims
+    ]
+    centers = list(zip(*coords_by_axis))
+
+    shuffled_ids = rng.permutation(n_tumors)
+    uptake_ids = set(shuffled_ids[:n_uptake])
+
+    regions = []
+    for idx, center in enumerate(centers):
+        is_uptake = idx in uptake_ids
+        region = {
+            'type': 'sphere',
+            'center': tuple(center),
+            'radius': tumor_radius,
+            'name': f"{'uptake' if is_uptake else 'secreting'}_tumor_region_{idx + 1}"
+        }
+        if is_uptake:
+            region['linear_rate'] = uptake_linear_rate
+        else:
+            region['linear_rate'] = secretion_linear_rate
+            region['rho_target'] = secretion_target_density
+        regions.append(region)
+
+    return regions
+
 # ==============================================================================
 # Functions to retrieve built scenarios
 # ==============================================================================
@@ -1173,7 +1430,9 @@ def get_scenario_by_name(name: str) -> Dict[str, Any]:
         'cosine_diffusion_1d': COSINE_DIFFUSION_1D,
         'cosine_diffusion_2d': COSINE_DIFFUSION_2D,
         'single_tumor_2d': SINGLE_TUMOR_2D,
-        'multiple_tumor_2d': MULTIPLE_TUMOR_2D
+        'multiple_tumor_2d': MULTIPLE_TUMOR_2D,
+        'convergence_test_2': CONVERGENCE_TEST_2,
+        'convergence_test_3': CONVERGENCE_TEST_3
     }
     
     if name not in scenarios:

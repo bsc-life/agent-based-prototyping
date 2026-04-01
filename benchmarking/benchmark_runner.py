@@ -39,6 +39,25 @@ class BenchmarkRunner:
         self.scenarios = []
         self.schemas = []
         self.results = {}
+        self.dt_threshold_results = {}
+        self.dt_eval_results = {}
+
+    @staticmethod
+    def _extract_errors_at_eval_times(times: List[float], error_timeseries: Dict[str, List[float]],
+                                      eval_times: List[float]) -> Dict[str, List[float]]:
+        """Extract relative errors at requested times using nearest available simulation time."""
+        l2_errors = []
+        linf_errors = []
+
+        for t_eval in eval_times:
+            idx = min(range(len(times)), key=lambda i: abs(times[i] - t_eval))
+            l2_errors.append(float(error_timeseries['l2_relative'][idx]))
+            linf_errors.append(float(error_timeseries['linf_relative'][idx]))
+
+        return {
+            'l2_relative': l2_errors,
+            'linf_relative': linf_errors
+        }
         
     def add_scenario(self, scenario: Dict[str, Any]):
         """
@@ -428,6 +447,464 @@ class BenchmarkRunner:
             'convergence_linf': conv_linf,
             'figure': str(fig_path)
         }
+
+    ### Methods to search for threshold dt 
+
+    @staticmethod
+    def _first_index_at_or_above(values: List[float], threshold: float) -> Optional[int]:
+        """Return index of first value >= threshold, or None if not found."""
+        for i, value in enumerate(values):
+            if value >= threshold:
+                return i
+        return None
+
+    def _run_dt_threshold_for_schema(self, schema_class: Type[Schema], schema_name: str,
+                                     scenario_base: Dict[str, Any], output_dir: Path,
+                                     target_error: float, growth_factor: float,
+                                     max_iterations: int, dt_start: Optional[float],
+                                     dt_max: Optional[float]) -> Dict[str, Any]:
+        """
+        Increase dt progressively and estimate the largest dt that keeps
+        L2/Linf relative error <= target.
+
+        This method is intentionally additive and does not alter the behavior of existing
+        benchmark flows.
+        """
+        if growth_factor <= 1.0:
+            raise ValueError("growth_factor must be greater than 1.0 when increasing dt")
+
+        initial_dt = float(dt_start if dt_start is not None else scenario_base['dt'])
+        if initial_dt <= 0.0:
+            raise ValueError(f"Invalid dt_start={initial_dt}. dt must be positive")
+
+        if dt_max is not None and dt_max <= 0.0:
+            raise ValueError("dt_max must be positive when provided")
+
+        dt_values: List[float] = []
+        l2_values: List[float] = []
+        linf_values: List[float] = []
+        durations: List[float] = []
+        errors_trace: List[Dict[str, float]] = []
+
+        def evaluate_dt(dt_value: float, probe_idx: int) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+            """Run one probe at a given dt and return (result, failure_message)."""
+            scenario = scenario_base.copy()
+            scenario['dt'] = float(dt_value)
+            scenario['name'] = f"{scenario_base['name']}_dt_probe_{probe_idx}".replace('.', '')
+            try:
+                result = self._run_single_benchmark(
+                    schema_class, schema_name, scenario,
+                    output_dir=output_dir,
+                    store_history=False,
+                    generate_plots=False
+                )
+                return result, None
+            except Exception as exc:
+                return None, str(exc)
+
+        status = 'completed'
+        failure_message = None
+        dt = initial_dt
+        probe_idx = 1
+
+        # Coarse geometric search: expand dt quickly to bracket the crossing zone.
+        for _ in range(max_iterations):
+            if dt_max is not None and dt > dt_max:
+                status = 'dt_max_reached'
+                break
+
+            result, failure = evaluate_dt(dt, probe_idx)
+            probe_idx += 1
+
+            if failure is not None:
+                status = 'failed'
+                failure_message = failure
+                break
+
+            errors = result.get('errors', {})
+            l2_rel = float(errors.get('l2_relative', np.nan))
+            linf_rel = float(errors.get('linf_relative', np.nan))
+
+            if not np.isfinite(l2_rel) or not np.isfinite(linf_rel):
+                status = 'non_finite_error'
+                break
+
+            dt_values.append(float(dt))
+            l2_values.append(l2_rel)
+            linf_values.append(linf_rel)
+            durations.append(float(result['duration']))
+            errors_trace.append({
+                'l2_relative': l2_rel,
+                'linf_relative': linf_rel
+            })
+
+            dt *= growth_factor
+
+        def first_index_above(values: List[float], threshold: float) -> Optional[int]:
+            for i, value in enumerate(values):
+                if value > threshold:
+                    return i
+            return None
+
+        def last_index_at_or_below(values: List[float], threshold: float) -> Optional[int]:
+            idx = None
+            for i, value in enumerate(values):
+                if value <= threshold:
+                    idx = i
+            return idx
+
+        l2_safe_idx = last_index_at_or_below(l2_values, target_error)
+        linf_safe_idx = last_index_at_or_below(linf_values, target_error)
+
+        l2_cross_idx = first_index_above(l2_values, target_error)
+        linf_cross_idx = first_index_above(linf_values, target_error)
+
+        def refine_largest_safe_dt(metric_key: str, safe_idx: int, cross_idx: int,
+                                   base_error: float) -> Tuple[float, float]:
+            """
+            Local bisection in [dt_safe, dt_unsafe] to refine largest dt with error <= target.
+            """
+            lo_dt = dt_values[safe_idx]
+            hi_dt = dt_values[cross_idx]
+            best_dt = lo_dt
+            best_err = base_error
+            bisect_steps = 8
+
+            nonlocal status, failure_message, probe_idx
+
+            for _ in range(bisect_steps):
+                mid_dt = 0.5 * (lo_dt + hi_dt)
+                result, failure = evaluate_dt(mid_dt, probe_idx)
+                probe_idx += 1
+
+                if failure is not None:
+                    status = 'failed'
+                    failure_message = failure
+                    break
+
+                errors = result.get('errors', {})
+                l2_mid = float(errors.get('l2_relative', np.nan))
+                linf_mid = float(errors.get('linf_relative', np.nan))
+
+                if not np.isfinite(l2_mid) or not np.isfinite(linf_mid):
+                    status = 'non_finite_error'
+                    break
+
+                mid_err = l2_mid if metric_key == 'l2_relative' else linf_mid
+
+                dt_values.append(float(mid_dt))
+                l2_values.append(l2_mid)
+                linf_values.append(linf_mid)
+                durations.append(float(result['duration']))
+                errors_trace.append({
+                    'l2_relative': l2_mid,
+                    'linf_relative': linf_mid
+                })
+
+                if mid_err <= target_error:
+                    lo_dt = mid_dt
+                    best_dt = mid_dt
+                    best_err = mid_err
+                else:
+                    hi_dt = mid_dt
+
+            return best_dt, best_err
+
+        if l2_safe_idx is not None and l2_cross_idx is not None and l2_cross_idx > l2_safe_idx:
+            l2_dt_refined, l2_err_refined = refine_largest_safe_dt(
+                metric_key='l2_relative',
+                safe_idx=l2_safe_idx,
+                cross_idx=l2_cross_idx,
+                base_error=l2_values[l2_safe_idx]
+            )
+        else:
+            l2_dt_refined = dt_values[l2_safe_idx] if l2_safe_idx is not None else None
+            l2_err_refined = l2_values[l2_safe_idx] if l2_safe_idx is not None else None
+
+        if linf_safe_idx is not None and linf_cross_idx is not None and linf_cross_idx > linf_safe_idx:
+            linf_dt_refined, linf_err_refined = refine_largest_safe_dt(
+                metric_key='linf_relative',
+                safe_idx=linf_safe_idx,
+                cross_idx=linf_cross_idx,
+                base_error=linf_values[linf_safe_idx]
+            )
+        else:
+            linf_dt_refined = dt_values[linf_safe_idx] if linf_safe_idx is not None else None
+            linf_err_refined = linf_values[linf_safe_idx] if linf_safe_idx is not None else None
+
+        if status == 'completed' and len(dt_values) >= max_iterations and (l2_cross_idx is None or linf_cross_idx is None):
+            status = 'max_iterations_reached'
+
+        result_dict = {
+            'schema': schema_name,
+            'scenario': scenario_base['name'],
+            'target_error': target_error,
+            'growth_factor': growth_factor,
+            'max_iterations': max_iterations,
+            'dt_start': initial_dt,
+            'dt_max': dt_max,
+            'status': status,
+            'failure_message': failure_message,
+            'trace': {
+                'dt': dt_values,
+                'l2_relative': l2_values,
+                'linf_relative': linf_values,
+                'duration': durations,
+                'errors': errors_trace
+            },
+            'threshold_l2': {
+                'reached': l2_safe_idx is not None,
+                'index': l2_safe_idx,
+                'dt': l2_dt_refined,
+                'error': l2_err_refined,
+            },
+            'threshold_linf': {
+                'reached': linf_safe_idx is not None,
+                'index': linf_safe_idx,
+                'dt': linf_dt_refined,
+                'error': linf_err_refined,
+            }
+        }
+        return result_dict
+
+    def run_dt_threshold_search(self, scenario_base: Dict[str, Any],
+                                target_error: float = 0.05,
+                                growth_factor: float = 1.5,
+                                max_iterations: int = 20,
+                                dt_start: Optional[float] = None,
+                                dt_max: Optional[float] = None,
+                                output_dir: Union[str, Path] = 'benchmark_results',
+                                output_csv: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
+        """
+        Run an opt-in dt threshold search for all registered schemas on one scenario.
+
+        dt is increased geometrically until each metric reaches the target error.
+        Existing benchmark methods are untouched and remain the default workflow.
+        """
+        if not self.schemas:
+            raise ValueError("No schemas registered. Use add_schema() before running threshold search")
+
+        if target_error <= 0.0:
+            raise ValueError("target_error must be positive")
+
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        scenario_name = scenario_base['name']
+        print(f"\nDT Threshold Search: scenario={scenario_name}, target_error={target_error:.2%}")
+        print(f"Schemas to test: {len(self.schemas)}")
+        print("=" * 70)
+
+        run_results = {}
+        for schema_class, schema_name in self.schemas:
+            print(f"\nTesting threshold for {schema_name}")
+            print("-" * 70)
+
+            schema_result = self._run_dt_threshold_for_schema(
+                schema_class=schema_class,
+                schema_name=schema_name,
+                scenario_base=scenario_base,
+                output_dir=output_dir,
+                target_error=target_error,
+                growth_factor=growth_factor,
+                max_iterations=max_iterations,
+                dt_start=dt_start,
+                dt_max=dt_max
+            )
+
+            run_results[schema_name] = schema_result
+            self.dt_threshold_results[(schema_name, scenario_name)] = schema_result
+
+            l2_info = schema_result['threshold_l2']
+            linf_info = schema_result['threshold_linf']
+
+            l2_msg = f"dt={l2_info['dt']:.6g}, err={l2_info['error']:.6e}" if l2_info['reached'] else "not reached"
+            linf_msg = f"dt={linf_info['dt']:.6g}, err={linf_info['error']:.6e}" if linf_info['reached'] else "not reached"
+
+            print(f"  status: {schema_result['status']}")
+            print(f"  L2 threshold: {l2_msg}")
+            print(f"  Linf threshold: {linf_msg}")
+
+            if schema_result['failure_message']:
+                print(f"  failure: {schema_result['failure_message']}")
+
+        if output_csv:
+            self.generate_dt_threshold_report(output_path=output_csv, scenario_name=scenario_name)
+
+        return run_results
+
+    def run_dt_eval_times_grid(self, scenario_base: Dict[str, Any],
+                               dt_values: List[float],
+                               eval_times: List[float],
+                               output_dir: Union[str, Path] = 'benchmark_results',
+                               output_csv: Optional[Union[str, Path]] = None) -> pd.DataFrame:
+        """
+        Run benchmarks for a fixed list of dt values and store errors at eval_times.
+
+        Produces one row per (schema, scenario, dt) with list-valued columns for
+        eval_times and corresponding relative errors.
+        """
+        if not self.schemas:
+            raise ValueError("No schemas registered. Use add_schema() before running dt eval-time grid")
+
+        if not dt_values:
+            raise ValueError("dt_values must be a non-empty list")
+
+        if not eval_times:
+            raise ValueError("eval_times must be a non-empty list")
+
+        if any(float(dt) <= 0.0 for dt in dt_values):
+            raise ValueError("All dt_values must be positive")
+
+        scenario_t_final = float(scenario_base['t_final'])
+        if any(float(t) < 0.0 or float(t) > scenario_t_final for t in eval_times):
+            raise ValueError("All eval_times must satisfy 0 <= t <= scenario['t_final']")
+
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        scenario_name = scenario_base['name']
+        print(f"\nDT Eval-Time Grid: scenario={scenario_name}")
+        print(f"Schemas to test: {len(self.schemas)}")
+        print(f"dt values: {dt_values}")
+        print(f"eval_times: {eval_times}")
+        print("=" * 70)
+
+        rows: List[Dict[str, Any]] = []
+        for schema_class, schema_name in self.schemas:
+            print(f"\nTesting eval-time grid for {schema_name}")
+            print("-" * 70)
+
+            for i, dt in enumerate(dt_values, start=1):
+                scenario = scenario_base.copy()
+                scenario['dt'] = float(dt)
+                scenario['name'] = f"{scenario_base['name']}_dt_eval_{i}".replace('.', '')
+
+                try:
+                    result = self._run_single_benchmark(
+                        schema_class=schema_class,
+                        schema_name=schema_name,
+                        scenario=scenario,
+                        output_dir=output_dir,
+                        store_history=True,
+                        generate_plots=False
+                    )
+                except Exception as exc:
+                    rows.append({
+                        'Schema': schema_name,
+                        'Scenario': scenario_base['name'],
+                        'dt': float(dt),
+                        'eval_times': [float(t) for t in eval_times],
+                        'l2_errors': np.nan,
+                        'linf_errors': np.nan,
+                        'Duration (s)': np.nan,
+                        'Status': 'failed',
+                        'Failure Message': str(exc)
+                    })
+                    continue
+
+                errors_at_eval = self._extract_errors_at_eval_times(
+                    times=result['times'],
+                    error_timeseries=result['error_timeseries'],
+                    eval_times=[float(t) for t in eval_times]
+                )
+
+                rows.append({
+                    'Schema': schema_name,
+                    'Scenario': scenario_base['name'],
+                    'dt': float(dt),
+                    'eval_times': [float(t) for t in eval_times],
+                    'l2_errors': errors_at_eval['l2_relative'],
+                    'linf_errors': errors_at_eval['linf_relative'],
+                    'Duration (s)': float(result['duration']),
+                    'Status': 'completed',
+                    'Failure Message': None
+                })
+
+        if not rows:
+            print("No dt eval-time rows were produced.")
+            return None
+
+        df = pd.DataFrame(rows)
+        df = df.sort_values(['Scenario', 'Schema', 'dt'])
+
+        self.dt_eval_results[scenario_name] = rows
+
+        print("\n" + "=" * 70)
+        print("DT EVAL-TIME GRID SUMMARY")
+        print("=" * 70)
+        print(df.to_string(index=False))
+
+        if output_csv:
+            output_csv = Path(output_csv)
+            output_csv.parent.mkdir(parents=True, exist_ok=True)
+            df.to_csv(output_csv, index=False)
+            print(f"\nDT eval-time grid saved to: {output_csv}")
+
+        return df
+
+    def generate_dt_threshold_report(self, output_path: Union[str, Path] = None,
+                                     scenario_name: Optional[str] = None) -> pd.DataFrame:
+        """
+        Generate a compact summary table for dt threshold searches.
+
+        Parameters
+        ----------
+        output_path : str or Path, optional
+            If provided, save report to CSV file.
+        scenario_name : str, optional
+            If provided, only include rows for this scenario.
+        """
+        if not self.dt_threshold_results:
+            print("No dt threshold results to report. Run run_dt_threshold_search() first.")
+            return None
+
+        rows = []
+        for (_, sc_name), result in self.dt_threshold_results.items():
+            if scenario_name is not None and sc_name != scenario_name:
+                continue
+
+            trace = result.get('trace', {})
+            l2_info = result.get('threshold_l2', {})
+            linf_info = result.get('threshold_linf', {})
+
+            row = {
+                'Schema': result.get('schema'),
+                'Scenario': result.get('scenario'),
+                'Target Error': result.get('target_error'),
+                'Status': result.get('status'),
+                'Iterations': len(trace.get('dt', [])),
+                'L2 Threshold Reached': l2_info.get('reached', False),
+                'L2 Threshold dt': l2_info.get('dt', np.nan),
+                'L2 Error at Threshold': l2_info.get('error', np.nan),
+                'Linf Threshold Reached': linf_info.get('reached', False),
+                'Linf Threshold dt': linf_info.get('dt', np.nan),
+                'Linf Error at Threshold': linf_info.get('error', np.nan),
+                'Failure Message': result.get('failure_message')
+            }
+            rows.append(row)
+
+        if not rows:
+            print("No dt threshold rows to report for the selected filters.")
+            return None
+
+        df = pd.DataFrame(rows)
+        df = df.sort_values(['Scenario', 'Schema'])
+
+        print("\n" + "=" * 70)
+        print("DT THRESHOLD SUMMARY")
+        print("=" * 70)
+        print(df.to_string(index=False))
+
+        if output_path:
+            output_path = Path(output_path)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            df.to_csv(output_path, index=False)
+            print(f"\nDT threshold summary saved to: {output_path}")
+
+        return df
+
+    ###
     
     def generate_summary_report(self, output_path: Union[str, Path] = None) -> pd.DataFrame:
         """

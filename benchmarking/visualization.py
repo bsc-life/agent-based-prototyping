@@ -813,6 +813,22 @@ def plot_scenario(scenario: dict):
         except Exception:
             ic_vals = None
 
+    def _bulk_style(reg: Dict[str, Any]) -> Tuple[str, str, float]:
+        if 'rho_target' in reg:
+            return 'tab:orange', 'Secreting (target)', 0.35
+        if 'linear_rate' in reg:
+            linear_rate = reg.get('linear_rate', 0.0)
+            if linear_rate < 0:
+                return 'tab:blue', 'Uptaking (linear)', 0.35
+            return 'tab:green', 'Linear', 0.35
+        if 'net_rate' in reg:
+            net_rate = reg.get('net_rate', 0.0)
+            if net_rate < 0:
+                return 'tab:blue', 'Uptaking (net)', 0.35
+            if net_rate > 0:
+                return 'tab:orange', 'Secreting (net)', 0.35
+        return 'C2', 'Bulk region', 0.25
+
     # --- Plotting ---
     # fig = plt.figure(figsize=(7 if ndim==1 else 8, 5 if ndim==1 else 7))
     fig = plt.figure(figsize=(5,5))
@@ -837,7 +853,8 @@ def plot_scenario(scenario: dict):
                 if reg.get('type') == 'sphere':
                     c = reg['center'][0] if isinstance(reg['center'], (list, tuple)) else reg['center']
                     r = reg['radius']
-                    ax.axvspan(c - r, c + r, color='C2', alpha=0.2, label='Bulk region')
+                    color, label, alpha = _bulk_style(reg)
+                    ax.axvspan(c - r, c + r, color=color, alpha=alpha, label=label)
                     # Draw black border for bulk region
                     ax.plot([c - r, c - r], ax.get_ylim(), color='k', linewidth=border_lw/2, linestyle='-')
                     ax.plot([c + r, c + r], ax.get_ylim(), color='k', linewidth=border_lw/2, linestyle='-')
@@ -864,7 +881,8 @@ def plot_scenario(scenario: dict):
         if bulk and 'regions' in bulk:
             for reg in bulk['regions']:
                 if reg.get('type') == 'sphere':
-                    circ = mpatches.Circle(reg['center'], reg['radius'], color='C2', alpha=1, label='Bulk region', ec='k', lw=border_lw)
+                    color, label, alpha = _bulk_style(reg)
+                    circ = mpatches.Circle(reg['center'], reg['radius'], color=color, alpha=alpha, label=label, ec='k', lw=border_lw)
                     ax.add_patch(circ)
         ax.set_xlabel('x')
         ax.set_ylabel('y')
@@ -904,7 +922,8 @@ def plot_scenario(scenario: dict):
                     xs = cx + r * np.cos(u) * np.sin(v)
                     ys = cy + r * np.sin(u) * np.sin(v)
                     zs = cz + r * np.cos(v)
-                    ax.plot_wireframe(xs, ys, zs, color='C2', alpha=0.2, linewidth=border_lw)
+                    color, _, alpha = _bulk_style(reg)
+                    ax.plot_wireframe(xs, ys, zs, color=color, alpha=alpha, linewidth=border_lw)
                     # Draw black border for sphere (approximate, just one circle)
                     ax.plot(xs[0], ys[0], zs[0], color='k', linewidth=border_lw/2)
         ax.set_xlabel('x')
