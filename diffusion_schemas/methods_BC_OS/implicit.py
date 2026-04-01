@@ -190,6 +190,7 @@ class ImplicitEulerBCOSSchema(Schema):
         if self._agents:
             self._step_agent_sources()
 
+
         self.t += self.dt
 
     def _step_diffusion_decay(self) -> None:
@@ -209,8 +210,6 @@ class ImplicitEulerBCOSSchema(Schema):
 
     def _step_bulk_sources(self) -> None:
         """Solves: (sigma^* - sigma) / dt = S_rhs - S_lhs * sigma^*"""
-        t_next = self.t + self.dt
-        coords = self._create_coordinate_grids()
                
         S_rhs = self._bulk.rhs_contribution.copy()
         S_lhs = self._bulk.lhs_contribution.copy()
