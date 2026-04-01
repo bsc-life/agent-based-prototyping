@@ -203,6 +203,9 @@ class CrankNicolsonBCISchema(Schema):
             lhs = bulk_lhs_np1.ravel().copy()
             # Preserve BC-imposed rows by not changing boundary diagonal entries.
             lhs[self._boundary_idx] = 0.0
+        else:
+            lhs = np.zeros_like(self.state)
+    
         
         # RHS = u^n + (1-theta)*dt * (D*Laplacian^n - lambda*u^n + S^n) + theta*dt*S^(n+1)
         rhs = self.state + \

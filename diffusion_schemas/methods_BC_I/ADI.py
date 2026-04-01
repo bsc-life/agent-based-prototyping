@@ -165,8 +165,7 @@ class ADIBCISchema(Schema):
         return LHS_x, RHS_x, LHS_y, RHS_y, LHS_z, RHS_z
 
     def step(self) -> None:
-        if self.ndim != 2:
-            raise NotImplementedError("Implicit source term is only implemented for 2D ADI currently.") 
+        if self.ndim != 2: raise NotImplementedError(f"{self.ndim}D ADI is not implemented yet") # just in case
     
         # --------------------- 2D CASE (Peaceman-Rachford with IMPLICIT source) ---------------------
         if self.ndim == 2:

@@ -195,6 +195,8 @@ class ImplicitEulerBCISchema(Schema):
             lhs[self._boundary_idx] = 0.0
 
             system_matrix = self.system_matrix + diags(self.dt * lhs, 0, format='csr')
+        else:
+            system_matrix = self.system_matrix
 
         # Apply boundary conditions directly to the system if needed
         if isinstance(self._boundary_conditions, DirichletBC):
