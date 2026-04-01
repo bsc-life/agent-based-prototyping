@@ -132,8 +132,6 @@ class ADIBCISchema(Schema):
         return LHS_x, RHS_x, LHS_y, RHS_y
     
     def _build_matrix_3d(self):
-        # Just copied the logic above, but still has to be tested and debugged
-
         Nx, Ny, Nz = self.grid_points
         dx, dy, dz = self.dx
         
@@ -141,34 +139,91 @@ class ADIBCISchema(Schema):
         # Each third-step carries a third of the decay: (λ/3) * (dt/3) = λ·dt/9
         decay_term = (self.decay_rate / 3.0) * dt_third
 
-        # X-Operators    
-        Lx = diags([np.ones(Nx-1)/dx**2, -2*np.ones(Nx)/dx**2, np.ones(Nx-1)/dx**2], [-1, 0, 1], shape=(Nx, Nx), format='csr')
+        # X-Operators
+        Lx = diags([np.ones(Nx-1)/dx**2, -2*np.ones(Nx)/dx**2, np.ones(Nx-1)/dx**2], [-1, 0, 1], shape=(Nx, Nx), format='csr').tolil()
         Ix = eye(Nx, format='csr')
 
-        LHS_x = Ix - dt_third * self.diffusion_coefficient * Lx + decay_term * Ix
-        RHS_x = Ix + dt_third * self.diffusion_coefficient * Lx - decay_term * Ix
+        if isinstance(self._boundary_conditions, NeumannBC):
+            Lx[0, 0], Lx[0, 1] = -2 / (dx**2), 2 / (dx**2)
+            Lx[-1, -1], Lx[-1, -2] = -2 / (dx**2), 2 / (dx**2)
+
+        Lx, Ix = Lx.tocsr(), Ix.tocsr()
+        LHS_x = (Ix - dt_third * self.diffusion_coefficient * Lx + decay_term * Ix).tolil()
+        RHS_x = (Ix + dt_third * self.diffusion_coefficient * Lx - decay_term * Ix).tolil()
+
+        if isinstance(self._boundary_conditions, DirichletBC):
+            for row in [0, -1]:
+                LHS_x[row, :] = 0; LHS_x[row, row] = 1
+                RHS_x[row, :] = 0; RHS_x[row, row] = 1
 
         # Y-Operators
-        Ly = diags([np.ones(Ny-1)/dy**2, -2*np.ones(Ny)/dy**2, np.ones(Ny-1)/dy**2], [-1, 0, 1], shape=(Ny, Ny), format='csr')
+        Ly = diags([np.ones(Ny-1)/dy**2, -2*np.ones(Ny)/dy**2, np.ones(Ny-1)/dy**2], [-1, 0, 1], shape=(Ny, Ny), format='csr').tolil()
         Iy = eye(Ny, format='csr')
 
-        LHS_y = Iy - dt_third * self.diffusion_coefficient * Ly + decay_term * Iy
-        RHS_y = Iy + dt_third * self.diffusion_coefficient * Ly - decay_term * Iy
+        if isinstance(self._boundary_conditions, NeumannBC):
+            Ly[0, 0], Ly[0, 1] = -2 / (dy**2), 2 / (dy**2)
+            Ly[-1, -1], Ly[-1, -2] = -2 / (dy**2), 2 / (dy**2)
+
+        Ly, Iy = Ly.tocsr(), Iy.tocsr()
+        LHS_y = (Iy - dt_third * self.diffusion_coefficient * Ly + decay_term * Iy).tolil()
+        RHS_y = (Iy + dt_third * self.diffusion_coefficient * Ly - decay_term * Iy).tolil()
+
+        if isinstance(self._boundary_conditions, DirichletBC):
+            for row in [0, -1]:
+                LHS_y[row, :] = 0; LHS_y[row, row] = 1
+                RHS_y[row, :] = 0; RHS_y[row, row] = 1
 
         # Z-Operators
-        Lz = diags([np.ones(Nz-1)/dz**2, -2*np.ones(Nz)/dz**2, np.ones(Nz-1)/dz**2], [-1, 0, 1], shape=(Nz, Nz), format='csr')
+        Lz = diags([np.ones(Nz-1)/dz**2, -2*np.ones(Nz)/dz**2, np.ones(Nz-1)/dz**2], [-1, 0, 1], shape=(Nz, Nz), format='csr').tolil()
         Iz = eye(Nz, format='csr')
 
-        LHS_z = Iz - dt_third * self.diffusion_coefficient * Lz + decay_term * Iz
-        RHS_z = Iz + dt_third * self.diffusion_coefficient * Lz - decay_term * Iz
+        if isinstance(self._boundary_conditions, NeumannBC):
+            Lz[0, 0], Lz[0, 1] = -2 / (dz**2), 2 / (dz**2)
+            Lz[-1, -1], Lz[-1, -2] = -2 / (dz**2), 2 / (dz**2)
+
+        Lz, Iz = Lz.tocsr(), Iz.tocsr()
+        LHS_z = (Iz - dt_third * self.diffusion_coefficient * Lz + decay_term * Iz).tolil()
+        RHS_z = (Iz + dt_third * self.diffusion_coefficient * Lz - decay_term * Iz).tolil()
+
+        if isinstance(self._boundary_conditions, DirichletBC):
+            for row in [0, -1]:
+                LHS_z[row, :] = 0; LHS_z[row, row] = 1
+                RHS_z[row, :] = 0; RHS_z[row, row] = 1
 
         return LHS_x, RHS_x, LHS_y, RHS_y, LHS_z, RHS_z
 
     def step(self) -> None:
-        if self.ndim != 2: raise NotImplementedError(f"{self.ndim}D ADI is not implemented yet") # just in case
-    
+        if self.ndim not in (1, 2, 3):
+            raise NotImplementedError(f"{self.ndim}D ADI is not implemented yet")
+
+        # --------------------- 1D CASE (Implicit source) ---------------------
+        if self.ndim == 1:
+            t_next = self.t + self.dt
+            N = self.grid_points[0]
+
+            source_explicit = self._compute_source_term(implicit=True, t=t_next)
+            source_rhs = np.zeros_like(self.state)
+            source_lhs = np.zeros_like(self.state)
+            if self._bulk is not None:
+                source_rhs = self._bulk.rhs_contribution
+                source_lhs = self._bulk.lhs_contribution
+                source_lhs[self._boundary_mask] = 0.0
+
+            rhs = self.state + self.dt * (source_rhs + source_explicit)
+
+            source_diag = diags([self.dt * source_lhs], [0], shape=(N, N), format='csr')
+            Ax = (self.system_matrix + source_diag).tolil()
+            rhs = rhs.reshape(N, 1)
+            rhs = self._apply_bc_to_sweep(Ax, rhs, self.dx[0], self.dt)
+            self.state = spsolve(Ax.tocsr(), rhs).reshape(self.grid_points)
+
+            if isinstance(self._boundary_conditions, DirichletBC):
+                val = self._boundary_conditions._get_value(t_next)
+                self.state[0] = val
+                self.state[-1] = val
+
         # --------------------- 2D CASE (Peaceman-Rachford with IMPLICIT source) ---------------------
-        if self.ndim == 2:
+        elif self.ndim == 2:
             dt_half = self.dt / 2.0
             t_mid = self.t + dt_half
             
@@ -262,7 +317,128 @@ class ADIBCISchema(Schema):
                 u_new[:, 0] = val; u_new[:, -1] = val
 
             self.state = u_new
-            self.t += self.dt
+
+        # --------------------- 3D CASE (Fractional-step with IMPLICIT source) ---------------------
+        elif self.ndim == 3:
+            dt_third = self.dt / 3.0
+            t_1 = self.t + dt_third
+            t_2 = self.t + 2 * dt_third
+            t_3 = self.t + self.dt
+
+            D = self.diffusion_coefficient
+            dx, dy, dz = self.dx
+            Nx, Ny, Nz = self.grid_points
+
+            LHS_x, RHS_x, LHS_y, RHS_y, LHS_z, RHS_z = self.system_matrix
+
+            # --- SWEEP 1: Implicit X, Explicit Y & Z (with implicit source) ---
+            source_explicit = self._compute_source_term(implicit=True, t=t_1)
+            source_rhs = np.zeros_like(self.state)
+            source_lhs = np.zeros_like(self.state)
+            if self._bulk is not None:
+                source_rhs = self._bulk.rhs_contribution
+                source_lhs = self._bulk.lhs_contribution
+                source_lhs[self._boundary_mask] = 0.0
+
+            rhs_y = (RHS_y @ self.state.transpose(1, 0, 2).reshape(Ny, Nx * Nz)).reshape(Ny, Nx, Nz).transpose(1, 0, 2)
+            rhs_z = (RHS_z @ self.state.transpose(2, 0, 1).reshape(Nz, Nx * Ny)).reshape(Nz, Nx, Ny).transpose(1, 2, 0)
+            rhs_1 = rhs_y + rhs_z - self.state + dt_third * (source_rhs + source_explicit)
+
+            if isinstance(self._boundary_conditions, NeumannBC):
+                flux = self._boundary_conditions._get_flux(t_1)
+                rhs_1[:, 0, :]  -= dt_third * D * 2 * flux / dy
+                rhs_1[:, -1, :] += dt_third * D * 2 * flux / dy
+                rhs_1[:, :, 0]  -= dt_third * D * 2 * flux / dz
+                rhs_1[:, :, -1] += dt_third * D * 2 * flux / dz
+
+            u_star = np.zeros((Nx, Ny, Nz))
+            for j in range(Ny):
+                for k in range(Nz):
+                    source_diag = diags([dt_third * source_lhs[:, j, k]], [0], shape=(Nx, Nx), format='csr')
+                    LHS_x_jk = (LHS_x + source_diag).tolil()
+                    rhs_1_jk = rhs_1[:, j, k].reshape(Nx, 1)
+                    rhs_1_jk = self._apply_bc_to_sweep(LHS_x_jk, rhs_1_jk, dx, dt_third)
+                    u_star[:, j, k] = spsolve(LHS_x_jk.tocsr(), rhs_1_jk).flatten()
+
+            if isinstance(self._boundary_conditions, DirichletBC):
+                val = self._boundary_conditions._get_value(t_1)
+                u_star[0, :, :] = val; u_star[-1, :, :] = val
+                u_star[:, 0, :] = val; u_star[:, -1, :] = val
+                u_star[:, :, 0] = val; u_star[:, :, -1] = val
+
+            # --- SWEEP 2: Implicit Y, Explicit X & Z (with implicit source) ---
+            source_explicit = self._compute_source_term(state=u_star, implicit=True, t=t_2)
+            source_rhs = np.zeros_like(self.state)
+            source_lhs = np.zeros_like(self.state)
+            if self._bulk is not None:
+                source_rhs = self._bulk.rhs_contribution
+                source_lhs = self._bulk.lhs_contribution
+                source_lhs[self._boundary_mask] = 0.0
+
+            rhs_x = (RHS_x @ u_star).reshape(Nx, Ny, Nz)
+            rhs_z = (RHS_z @ u_star.transpose(2, 0, 1).reshape(Nz, Nx * Ny)).reshape(Nz, Nx, Ny).transpose(1, 2, 0)
+            rhs_2 = rhs_x + rhs_z - u_star + dt_third * (source_rhs + source_explicit)
+
+            if isinstance(self._boundary_conditions, NeumannBC):
+                flux = self._boundary_conditions._get_flux(t_2)
+                rhs_2[0, :, :]  -= dt_third * D * 2 * flux / dx
+                rhs_2[-1, :, :] += dt_third * D * 2 * flux / dx
+                rhs_2[:, :, 0]  -= dt_third * D * 2 * flux / dz
+                rhs_2[:, :, -1] += dt_third * D * 2 * flux / dz
+
+            u_star_star = np.zeros((Nx, Ny, Nz))
+            for i in range(Nx):
+                for k in range(Nz):
+                    source_diag = diags([dt_third * source_lhs[i, :, k]], [0], shape=(Ny, Ny), format='csr')
+                    LHS_y_ik = (LHS_y + source_diag).tolil()
+                    rhs_2_ik = rhs_2[i, :, k].reshape(Ny, 1)
+                    rhs_2_ik = self._apply_bc_to_sweep(LHS_y_ik, rhs_2_ik, dy, dt_third)
+                    u_star_star[i, :, k] = spsolve(LHS_y_ik.tocsr(), rhs_2_ik).flatten()
+
+            if isinstance(self._boundary_conditions, DirichletBC):
+                val = self._boundary_conditions._get_value(t_2)
+                u_star_star[0, :, :] = val; u_star_star[-1, :, :] = val
+                u_star_star[:, 0, :] = val; u_star_star[:, -1, :] = val
+                u_star_star[:, :, 0] = val; u_star_star[:, :, -1] = val
+
+            # --- SWEEP 3: Implicit Z, Explicit X & Y (with implicit source) ---
+            source_explicit = self._compute_source_term(state=u_star_star, implicit=True, t=t_3)
+            source_rhs = np.zeros_like(self.state)
+            source_lhs = np.zeros_like(self.state)
+            if self._bulk is not None:
+                source_rhs = self._bulk.rhs_contribution
+                source_lhs = self._bulk.lhs_contribution
+                source_lhs[self._boundary_mask] = 0.0
+
+            rhs_x = (RHS_x @ u_star_star).reshape(Nx, Ny, Nz)
+            rhs_y = (RHS_y @ u_star_star.transpose(1, 0, 2).reshape(Ny, Nx * Nz)).reshape(Ny, Nx, Nz).transpose(1, 0, 2)
+            rhs_3 = rhs_x + rhs_y - u_star_star + dt_third * (source_rhs + source_explicit)
+
+            if isinstance(self._boundary_conditions, NeumannBC):
+                flux = self._boundary_conditions._get_flux(t_3)
+                rhs_3[0, :, :]  -= dt_third * D * 2 * flux / dx
+                rhs_3[-1, :, :] += dt_third * D * 2 * flux / dx
+                rhs_3[:, 0, :]  -= dt_third * D * 2 * flux / dy
+                rhs_3[:, -1, :] += dt_third * D * 2 * flux / dy
+
+            u_new = np.zeros((Nx, Ny, Nz))
+            for i in range(Nx):
+                for j in range(Ny):
+                    source_diag = diags([dt_third * source_lhs[i, j, :]], [0], shape=(Nz, Nz), format='csr')
+                    LHS_z_ij = (LHS_z + source_diag).tolil()
+                    rhs_3_ij = rhs_3[i, j, :].reshape(Nz, 1)
+                    rhs_3_ij = self._apply_bc_to_sweep(LHS_z_ij, rhs_3_ij, dz, dt_third)
+                    u_new[i, j, :] = spsolve(LHS_z_ij.tocsr(), rhs_3_ij).flatten()
+
+            if isinstance(self._boundary_conditions, DirichletBC):
+                val = self._boundary_conditions._get_value(t_3)
+                u_new[0, :, :] = val; u_new[-1, :, :] = val
+                u_new[:, 0, :] = val; u_new[:, -1, :] = val
+                u_new[:, :, 0] = val; u_new[:, :, -1] = val
+
+            self.state = u_new
+
+        self.t += self.dt
 
     def _apply_bc_to_sweep(self, matrix, rhs_array: np.ndarray, h: float, dt_sweep: float) -> np.ndarray:
         if self._boundary_conditions is None:
