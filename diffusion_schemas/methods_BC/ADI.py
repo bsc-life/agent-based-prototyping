@@ -141,7 +141,7 @@ class ADIBCSchema(Schema):
 
     def step(self) -> None:
 
-        if self.ndim == 3: raise NotImplementedError("3D ADI is not implemented yet") # just in case
+        if self.ndim != 2: raise NotImplementedError(f"{self.ndim}D ADI is not implemented yet") # just in case
 
         source = self._compute_source_term()
         
