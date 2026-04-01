@@ -10,6 +10,7 @@ from benchmarking import (
     BenchmarkRunner,
     create_scenario_with_numerical_reference,
     create_scenario_with_numerical_reference_cached,
+    generate_tumor_regions_by_density,
     get_default_scenarios,
     get_scenario_by_name,
     create_scenario,
@@ -336,13 +337,14 @@ def single_tumor():
 
     base_scenario["bulk"]["regions"][0]["linear_rate"] = base_scenario["bulk"]["regions"][0].pop("net_rate")
 
-    dt_values = [0.5, 0.1]
+    dt_values = [1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.3, 0.4, 0.5, 1, 2, 3, 4, 5]
     scenarios = []
     
     for dt in dt_values:
         scenario = copy.deepcopy(base_scenario)
         scenario["dt"] = dt
         scenario["name"] = f"single_tumor_2d_dt{dt}".replace(".", "")
+        scenario["bulk"]["regions"][0]["linear_rate"] = scenario["bulk"]["regions"][0]["net_rate"].pop()
         scenarios.append(scenario)
     
     runner = BenchmarkRunner()
@@ -350,7 +352,7 @@ def single_tumor():
     runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
     runner.add_schema(ImplicitEulerBCISchema, "Implicit Euler with Implicit Source")
     runner.add_schema(ImplicitEulerBCOSSchema, "Implicit Euler with Operator Splitting")
-    # runner.add_schema(ImplicitLODBCSchema, "Implicit LOD")
+    runner.add_schema(ImplicitLODBCSchema, "Implicit LOD")
     # runner.add_schema(ImplicitLODBCISchema, "Implicit LOD with Implicit Source")
     # runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
     # runner.add_schema(CrankNicolsonBCISchema, "Crank-Nicolson with Implicit Source")
@@ -370,7 +372,7 @@ def single_tumor():
     )
     
     summary = runner.generate_summary_report(
-        output_path='benchmark_results/single_tumor/summary.csv'
+        output_path='benchmark_results/single_tumor/summary_implicits.csv'
     )
     
     return results, summary
@@ -487,13 +489,13 @@ def multiple_tumor():
 
     # Create scenarios by modifying base scenario parameters
     base_scenario = get_scenario_by_name('multiple_tumor_2d')
-    store = True
+    store = False
     base_scenario["golden_solution"]["dt_ref"] = 0.001
     base_scenario["store_history"] = store
     base_scenario["t_final"] = 10
     
     dx_values = [20]
-    dt_values = [0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.01]
+    dt_values = [1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.3, 0.4, 0.5, 1, 2, 3, 4, 5]
     scenarios = []
 
     for dt in dt_values:
@@ -505,27 +507,28 @@ def multiple_tumor():
             scenarios.append(scenario)
 
     # Parametric sweep over dx values, keeping dt fixed at 0.01
-    dt_values = [0.001,0.005,0.01,0.05,0.1,0.5,1,5]
-    dt_values2 = [0.2,0.3,0.4,2,3,4]
-
-    scenarios = []
-    for dt in dt_values2.append(dt_values):
-        scenario = copy.deepcopy(base_scenario)
-        scenario["dt"] = dt
-        scenario["t_final"] = 10
-        scenario["grid_points"] = tuple(int(s / 20) for s in scenario["domain_size"])
-        scenario["name"] = f"multiple_tumor_2d_dt{dt}_dx20_R50"
-        scenario["name"] = scenario["name"].replace('.','')
-        scenarios.append(scenario)
+    # dt_values = [0.001,0.005,0.01,0.05,0.1,0.5,1,5]
+    # dt_values2 = [0.2,0.3,0.4,2,3,4]
+    # scenarios = []
+    # for dt in dt_values2.append(dt_values):
+    #     scenario = copy.deepcopy(base_scenario)
+    #     scenario["dt"] = dt
+    #     scenario["t_final"] = 10
+    #     scenario["grid_points"] = tuple(int(s / 20) for s in scenario["domain_size"])
+    #     scenario["name"] = f"multiple_tumor_2d_dt{dt}_dx20_R50"
+    #     scenario["name"] = scenario["name"].replace('.','')
+    #     scenarios.append(scenario)
 
     runner = BenchmarkRunner()
 
     # runner.add_schema(ExplicitEulerBCSchema, "Explicit Euler")
     runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
+    runner.add_schema(ImplicitEulerBCISchema, "Implicit Euler with Implicit Source")
+    runner.add_schema(ImplicitEulerBCOSSchema, "Implicit Euler with Operator Splitting")
     runner.add_schema(ImplicitLODBCSchema, "Implicit LOD")
-    runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
-    runner.add_schema(CrankNicolsonLODBCSchema, "Crank-Nicolson LOD")
-    runner.add_schema(ADIBCSchema, "ADI")
+    # runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
+    # runner.add_schema(CrankNicolsonLODBCSchema, "Crank-Nicolson LOD")
+    # runner.add_schema(ADIBCSchema, "ADI")
 
     for scenario in scenarios:
         runner.add_scenario(scenario)
@@ -542,14 +545,136 @@ def multiple_tumor():
     )
     
     summary = runner.generate_summary_report(
-        output_path='benchmark_results/multiple_tumor/summary_dt_dx20_t10_R50_2.csv'
+        output_path='benchmark_results/multiple_tumor/summary_implicits.csv'
+    )
+
+    return results, summary
+
+def dt_threshold_test():
+
+    print("\n" + "=" * 70)
+    print("Multiple Tumor 2D - dt Threshold Search (5% error)")
+    print("=" * 70)
+
+    base_scenario = copy.deepcopy(get_scenario_by_name('convergence_test_2'))
+    base_scenario["store_history"] = False
+
+    runner = BenchmarkRunner()
+    runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
+    runner.add_schema(ImplicitEulerBCISchema, "Implicit Euler with Implicit Source")
+    runner.add_schema(ImplicitEulerBCOSSchema, "Implicit Euler with Operator Splitting")
+    runner.add_schema(ImplicitLODBCSchema, "Implicit LOD")
+    runner.add_schema(ImplicitLODBCISchema, "Implicit LOD with Implicit Source")
+    runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
+    runner.add_schema(CrankNicolsonBCISchema, "Crank-Nicolson with Implicit Source")
+    runner.add_schema(CrankNicolsonLODBCSchema, "Crank-Nicolson LOD")
+    runner.add_schema(CrankNicolsonLODBCISchema, "Crank-Nicolson LOD with Implicit Source")
+    runner.add_schema(ADIBCSchema, "ADI")
+    runner.add_schema(ADIBCISchema, "ADI with Implicit Source")
+
+    results1 = runner.run_dt_threshold_search(
+        scenario_base=base_scenario,
+        target_error=0.05,
+        growth_factor=1.5,
+        max_iterations=20,
+        dt_start=1e-2,
+        dt_max=5.0,
+        output_dir='benchmark_results/convergence_test_2/dt_threshold_search',
+        output_csv='benchmark_results/convergence_test_2/dt_threshold_summary.csv'
+    )
+    
+    # Additional: run dt-eval grid for fixed dt values
+    dt_values = [1, 1e-1, 1e-2, 1e-3]
+    eval_times = [0.5, 1, 2, 3, 4]
+
+    results2 = runner.run_dt_eval_times_grid(
+        scenario_base=base_scenario,
+        dt_values=dt_values,
+        eval_times=eval_times,
+        output_dir='benchmark_results/convergence_test_2/dt_eval_grid',
+        output_csv='benchmark_results/convergence_test_2/dt_eval_grid_summary.csv'
+    )
+
+    return None, None
+
+def dynamic_tumor():
+    print("\n" + "=" * 70)
+    print("Dynamic Tumor 2D Benchmarking")
+    print("=" * 70)
+
+    dt_values = [0.01, 0.1, 1.0]
+    # For 2D, density units are tumors/mm^2.
+    densities = [
+        ('low', 5.0),
+        ('mid', 10.0),
+        ('high', 15.0),
+        ('very-high', 20.0)
+    ]
+
+    output_dir = Path('benchmark_results/dynamic_tumor')
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    runner = BenchmarkRunner()
+
+    runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
+    runner.add_schema(ImplicitEulerBCISchema, "Implicit Euler with Implicit Source")
+    runner.add_schema(ImplicitEulerBCOSSchema, "Implicit Euler with Operator Splitting")
+    runner.add_schema(ImplicitLODBCSchema, "Implicit LOD")
+    runner.add_schema(ImplicitLODBCISchema, "Implicit LOD with Implicit Source")
+    runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
+    runner.add_schema(CrankNicolsonBCISchema, "Crank-Nicolson with Implicit Source")
+    runner.add_schema(CrankNicolsonLODBCSchema, "Crank-Nicolson LOD")
+    runner.add_schema(CrankNicolsonLODBCISchema, "Crank-Nicolson LOD with Implicit Source")
+    runner.add_schema(ADIBCSchema, "ADI")
+    runner.add_schema(ADIBCISchema, "ADI with Implicit Source")
+
+    for dt in dt_values:
+        for i, (label, density) in enumerate(densities):
+            scenario = copy.deepcopy(get_scenario_by_name('multiple_tumor_2d'))
+            scenario["t_final"] = 10
+            scenario["dt"] = dt
+            scenario["golden_solution"]["dt_ref"] = 0.01
+            scenario["golden_solution"]["schema_class"] = CrankNicolsonBCSchema
+            scenario['name'] = f"multiple_tumor_2d_dt{scenario['dt']}_{label}_density".replace(".", "")
+            scenario['description'] = (
+                f"{label.capitalize()} density setup ({density} tumors/mm^2), dt={dt}"
+            )
+
+            scenario['bulk'] = {
+                'regions': generate_tumor_regions_by_density(
+                    density=density,
+                    domain_size=scenario['domain_size'],
+                    grid_points=scenario['grid_points'],
+                    tumor_radius=50.0,
+                    uptake_linear_rate=-10.0,
+                    secretion_linear_rate=10.0,
+                    secretion_target_density=19.0,
+                    secreting_fraction=0.5,
+                    seed=2026 + 3,
+                    min_tumors=1,
+                )
+            }
+            runner.add_scenario(scenario)
+
+        # fig = plot_scenario(scenario)
+        # fig.savefig(output_dir / f"{scenario['name']}_setup.png", dpi=200, bbox_inches='tight')
+        # plt.close(fig)
+
+    results = runner.run(
+        output_dir=str(output_dir),
+        store_history=False,
+        generate_plots=True
+    )
+
+    summary = runner.generate_summary_report(
+        output_path=str(output_dir / 'summary_dt_dx20.csv')
     )
 
     return results, summary
 
 def main():
 
-    results, summary = single_tumor()
+    results, summary = dt_threshold_test()
 
 if __name__ == "__main__":
     main()
