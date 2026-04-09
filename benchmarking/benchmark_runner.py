@@ -506,6 +506,7 @@ class BenchmarkRunner:
         failure_message = None
         dt = initial_dt
         probe_idx = 1
+        dt_start_retry_applied = False
 
         # Coarse geometric search: expand dt quickly to bracket the crossing zone.
         for _ in range(max_iterations):
@@ -537,6 +538,24 @@ class BenchmarkRunner:
                 'l2_relative': l2_rel,
                 'linf_relative': linf_rel
             })
+            print(f"    probe {probe_idx - 1}: dt={dt:.6g}, L2={l2_rel:.6e}, Linf={linf_rel:.6e}")
+
+            # Fast-fail: if the first probe is already above target for both metrics,
+            # continuing the geometric increase cannot recover a safe dt.
+            if len(dt_values) == 1 and l2_rel > target_error and linf_rel > target_error:
+                status = 'dt_start_above_target'
+                failure_message = (
+                    "Initial dt is above target for both L2 and Linf;"
+                )
+                break
+            
+            # One-time recovery: if first probe is above target for both metrics,
+            # retry once with dt_start / 2 before continuing geometric growth.
+            # if (not dt_start_retry_applied and len(dt_values) == 1
+            #         and l2_rel > target_error and linf_rel > target_error):
+            #     dt = 0.5 * dt
+            #     dt_start_retry_applied = True
+            #     continue
 
             dt *= growth_factor
 
@@ -600,6 +619,7 @@ class BenchmarkRunner:
                     'l2_relative': l2_mid,
                     'linf_relative': linf_mid
                 })
+                print(f"    probe {probe_idx - 1}: dt={mid_dt:.6g}, L2={l2_mid:.6e}, Linf={linf_mid:.6e}")
 
                 if mid_err <= target_error:
                     lo_dt = mid_dt
@@ -674,7 +694,8 @@ class BenchmarkRunner:
                                 dt_start: Optional[float] = None,
                                 dt_max: Optional[float] = None,
                                 output_dir: Union[str, Path] = 'benchmark_results',
-                                output_csv: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
+                                output_csv: Optional[Union[str, Path]] = None,
+                                generate_plots: bool = True) -> Dict[str, Any]:
         """
         Run an opt-in dt threshold search for all registered schemas on one scenario.
 
@@ -696,6 +717,7 @@ class BenchmarkRunner:
         print("=" * 70)
 
         run_results = {}
+        threshold_plot_results = {}
         for schema_class, schema_name in self.schemas:
             print(f"\nTesting threshold for {schema_name}")
             print("-" * 70)
@@ -711,6 +733,8 @@ class BenchmarkRunner:
                 dt_start=dt_start,
                 dt_max=dt_max
             )
+
+            schema_result['figures'] = []
 
             run_results[schema_name] = schema_result
             self.dt_threshold_results[(schema_name, scenario_name)] = schema_result
@@ -728,6 +752,43 @@ class BenchmarkRunner:
             if schema_result['failure_message']:
                 print(f"  failure: {schema_result['failure_message']}")
 
+            if generate_plots:
+                chosen_dt = None
+                if schema_result['threshold_l2'].get('dt') is not None:
+                    chosen_dt = float(schema_result['threshold_l2']['dt'])
+                elif schema_result['threshold_linf'].get('dt') is not None:
+                    chosen_dt = float(schema_result['threshold_linf']['dt'])
+
+                if chosen_dt is not None:
+                    scenario = scenario_base.copy()
+                    scenario['dt'] = chosen_dt
+                    scenario['name'] = scenario_name
+
+                    try:
+                        plotted_result = self._run_single_benchmark(
+                            schema_class=schema_class,
+                            schema_name=schema_name,
+                            scenario=scenario,
+                            output_dir=output_dir,
+                            store_history=False,
+                            generate_plots=True
+                        )
+                        schema_result['figures'].extend(plotted_result.get('figures', []))
+                        threshold_plot_results[schema_name] = plotted_result
+                    except Exception as exc:
+                        print(f"  threshold plot generation failed: {exc}")
+
+        if generate_plots and len(threshold_plot_results) > 1:
+            scenario_dir = output_dir / scenario_name
+            scenario_dir.mkdir(parents=True, exist_ok=True)
+
+            comparison_path = scenario_dir / "method_comparison_dt_threshold.png"
+            plot_method_comparison(scenario_name, threshold_plot_results, comparison_path)
+
+            for schema_name, schema_result in run_results.items():
+                if schema_name in threshold_plot_results:
+                    schema_result['figures'].append(str(comparison_path))
+
         if output_csv:
             self.generate_dt_threshold_report(output_path=output_csv, scenario_name=scenario_name)
 
@@ -737,7 +798,8 @@ class BenchmarkRunner:
                                dt_values: List[float],
                                eval_times: List[float],
                                output_dir: Union[str, Path] = 'benchmark_results',
-                               output_csv: Optional[Union[str, Path]] = None) -> pd.DataFrame:
+                               output_csv: Optional[Union[str, Path]] = None,
+                               generate_plots: bool = True) -> pd.DataFrame:
         """
         Run benchmarks for a fixed list of dt values and store errors at eval_times.
 
@@ -771,6 +833,7 @@ class BenchmarkRunner:
         print("=" * 70)
 
         rows: List[Dict[str, Any]] = []
+        schema_completed_results: Dict[str, List[Tuple[float, Dict[str, Any]]]] = defaultdict(list)
         for schema_class, schema_name in self.schemas:
             print(f"\nTesting eval-time grid for {schema_name}")
             print("-" * 70)
@@ -787,7 +850,7 @@ class BenchmarkRunner:
                         scenario=scenario,
                         output_dir=output_dir,
                         store_history=True,
-                        generate_plots=False
+                        generate_plots=generate_plots
                     )
                 except Exception as exc:
                     rows.append({
@@ -820,6 +883,7 @@ class BenchmarkRunner:
                     'Status': 'completed',
                     'Failure Message': None
                 })
+                schema_completed_results[schema_name].append((float(dt), result))
 
         if not rows:
             print("No dt eval-time rows were produced.")
@@ -834,6 +898,27 @@ class BenchmarkRunner:
         print("DT EVAL-TIME GRID SUMMARY")
         print("=" * 70)
         print(df.to_string(index=False))
+
+        if generate_plots:
+            comparison_inputs = {}
+            for schema_name, results_for_schema in schema_completed_results.items():
+                if not results_for_schema:
+                    continue
+
+                base_dt = float(scenario_base['dt'])
+                selected_dt, selected_result = min(
+                    results_for_schema,
+                    key=lambda item: abs(item[0] - base_dt)
+                )
+                comparison_inputs[schema_name] = selected_result
+
+            if len(comparison_inputs) > 1:
+                scenario_dir = output_dir / scenario_name
+                scenario_dir.mkdir(parents=True, exist_ok=True)
+
+                comparison_path = scenario_dir / "method_comparison_dt_eval.png"
+                plot_method_comparison(scenario_name, comparison_inputs, comparison_path)
+                df['Comparison Figure'] = str(comparison_path)
 
         if output_csv:
             output_csv = Path(output_csv)

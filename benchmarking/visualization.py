@@ -829,6 +829,34 @@ def plot_scenario(scenario: dict):
                 return 'tab:orange', 'Secreting (net)', 0.35
         return 'C2', 'Bulk region', 0.25
 
+    def _rectangle_bounds(reg: Dict[str, Any]) -> Tuple[np.ndarray, np.ndarray]:
+        origin = np.asarray(reg['origin'], dtype=float)
+        size = np.asarray(reg['size'], dtype=float)
+        return origin, origin + size
+
+    def _draw_box_edges_3d(ax, origin: np.ndarray, corner: np.ndarray,
+                           color: str, alpha: float, lw: float) -> None:
+        x0, y0, z0 = origin
+        x1, y1, z1 = corner
+        vertices = np.array([
+            [x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0],
+            [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1],
+        ])
+        edges = [
+            (0, 1), (1, 2), (2, 3), (3, 0),
+            (4, 5), (5, 6), (6, 7), (7, 4),
+            (0, 4), (1, 5), (2, 6), (3, 7),
+        ]
+        for i0, i1 in edges:
+            ax.plot(
+                [vertices[i0, 0], vertices[i1, 0]],
+                [vertices[i0, 1], vertices[i1, 1]],
+                [vertices[i0, 2], vertices[i1, 2]],
+                color=color,
+                alpha=alpha,
+                linewidth=lw,
+            )
+
     # --- Plotting ---
     # fig = plt.figure(figsize=(7 if ndim==1 else 8, 5 if ndim==1 else 7))
     fig = plt.figure(figsize=(5,5))
@@ -858,6 +886,13 @@ def plot_scenario(scenario: dict):
                     # Draw black border for bulk region
                     ax.plot([c - r, c - r], ax.get_ylim(), color='k', linewidth=border_lw/2, linestyle='-')
                     ax.plot([c + r, c + r], ax.get_ylim(), color='k', linewidth=border_lw/2, linestyle='-')
+                elif reg.get('type') == 'rectangle':
+                    origin, corner = _rectangle_bounds(reg)
+                    color, label, alpha = _bulk_style(reg)
+                    x0, x1 = origin[0], corner[0]
+                    ax.axvspan(x0, x1, color=color, alpha=alpha, label=label)
+                    ax.plot([x0, x0], ax.get_ylim(), color='k', linewidth=border_lw/2, linestyle='-')
+                    ax.plot([x1, x1], ax.get_ylim(), color='k', linewidth=border_lw/2, linestyle='-')
         ax.set_xlabel('x')
         ax.set_ylabel('Concentration')
         ax.set_title(f"{desc}")
@@ -884,6 +919,20 @@ def plot_scenario(scenario: dict):
                     color, label, alpha = _bulk_style(reg)
                     circ = mpatches.Circle(reg['center'], reg['radius'], color=color, alpha=alpha, label=label, ec='k', lw=border_lw)
                     ax.add_patch(circ)
+                elif reg.get('type') == 'rectangle':
+                    origin, corner = _rectangle_bounds(reg)
+                    color, label, alpha = _bulk_style(reg)
+                    rect = mpatches.Rectangle(
+                        (origin[0], origin[1]),
+                        corner[0] - origin[0],
+                        corner[1] - origin[1],
+                        color=color,
+                        alpha=alpha,
+                        label=label,
+                        ec='k',
+                        lw=border_lw,
+                    )
+                    ax.add_patch(rect)
         ax.set_xlabel('x')
         ax.set_ylabel('y')
         ax.set_title(f"{desc}")
@@ -926,6 +975,11 @@ def plot_scenario(scenario: dict):
                     ax.plot_wireframe(xs, ys, zs, color=color, alpha=alpha, linewidth=border_lw)
                     # Draw black border for sphere (approximate, just one circle)
                     ax.plot(xs[0], ys[0], zs[0], color='k', linewidth=border_lw/2)
+                elif reg.get('type') == 'rectangle':
+                    origin, corner = _rectangle_bounds(reg)
+                    color, _, alpha = _bulk_style(reg)
+                    _draw_box_edges_3d(ax, origin, corner, color=color, alpha=alpha, lw=border_lw)
+                    _draw_box_edges_3d(ax, origin, corner, color='k', alpha=1.0, lw=border_lw/2)
         ax.set_xlabel('x')
         ax.set_ylabel('y')
         ax.set_zlabel('z')

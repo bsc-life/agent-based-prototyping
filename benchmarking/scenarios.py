@@ -976,7 +976,7 @@ COSINE_DIFFUSION_1D = {
     
     'boundary_condition': {
         'type': 'neumann',
-        'value': 0.0
+        'flux': 0.0
     },
     
     'agents': None,
@@ -1005,7 +1005,7 @@ COSINE_DIFFUSION_2D = {
     
     'boundary_condition': {
         'type': 'neumann',
-        'value': 0.0
+        'flux': 0.0
     },
     
     'agents': None,
@@ -1020,13 +1020,15 @@ COSINE_DIFFUSION_2D = {
 # BioFVM CONVERGENCE TESTS
 # ==============================================================================
 
+# 2nd test
+
 CONVERGENCE_TEST_2 = {
     'name': 'convergence_test_2',
     'description': '3-D diffusion-reaction with bulk sources (BioFVM convergence test 2)',
     
     # Domain is [-500, 500]^3, translated here to [0, 1000]^3 for positive coordinates
     'domain_size': (1000.0, 1000.0, 1000.0),
-    'grid_points': (int(1000.0/10), int(1000.0/10), int(1000.0/10)), # Medium resolution dx = 20 μm [cite: 538]
+    'grid_points': (int(1000.0/10), int(1000.0/10), int(1000.0/10)), # Medium resolution dx = 10 μm 
     'dt': 0.01, # Example testing dt
     't_final': 4.0, # Simulated 4 minutes of diffusion 
     
@@ -1035,12 +1037,12 @@ CONVERGENCE_TEST_2 = {
     
     'initial_condition': {
         'type': 'uniform',
-        'value': 38.0 # Typical starting point, bounded by saturation density ρ* = 38 mmHg 
+        'value': 38.0 # Typical starting point, bounded by saturation density of bulks ρ* = 38 mmHg 
     },
     
     'boundary_condition': {
         'type': 'neumann',
-        'value': 0.0 # D∇ρ·n = 0
+        'flux': 0.0 # D∇ρ·n = 0
     },
     
     'bulk': {
@@ -1110,6 +1112,80 @@ CONVERGENCE_TEST_2 = {
     'store_history': False
 }
 
+CONVERGENCE_TEST_2_2D = {
+    'name': 'convergence_test_2_2D',
+    'description': '2-D diffusion-reaction with bulk sources (BioFVM convergence test 2)',
+    
+    # Domain is [-500, 500]^2, translated here to [0, 1000]^2 for positive coordinates
+    'domain_size': (1000.0, 1000.0),
+    'grid_points': (int(1000.0/10), int(1000.0/10)), # Medium resolution dx = 10 μm 
+    'dt': 0.001, # Example testing dt
+    't_final': 4.0, # Simulated 4 minutes of diffusion 
+    
+    'diffusion_coefficient': 1e5, # D = 10^5 μm^2/min
+    'decay_rate': 0.1, # λ = 0.1 min^-1 
+    
+    'initial_condition': {
+        'type': 'uniform',
+        'value': 38.0 # Typical starting point, bounded by saturation density of bulks ρ* = 38 mmHg 
+    },
+    
+    'boundary_condition': {
+        'type': 'neumann',
+        'value': 0.0 # D∇ρ·n = 0
+    },
+    
+    'bulk': {
+        'regions': [
+            # X-faces (Full Y and Z spans)
+            {
+                'type': 'rectangle',
+                'origin': (0.0, 0.0),
+                'size': (40.0, 1000.0),
+                'linear_rate': 38.0,
+                'rho_target': 38.0,
+                'name': 'x_min_boundary'
+            },
+            {
+                'type': 'rectangle',
+                'origin': (960.0, 0.0),
+                'size': (40.0, 1000.0),
+                'linear_rate': 38.0,
+                'rho_target': 38.0,
+                'name': 'x_max_boundary'
+            },
+            # Y-faces (Restricted X span to avoid overlapping with X-faces)
+            {
+                'type': 'rectangle',
+                'origin': (40.0, 0.0),
+                'size': (920.0, 40.0),
+                'linear_rate': 38.0,
+                'rho_target': 38.0,
+                'name': 'y_min_boundary'
+            },
+            {
+                'type': 'rectangle',
+                'origin': (40.0, 960.0),
+                'size': (920.0, 40.0),
+                'linear_rate': 38.0,
+                'rho_target': 38.0,
+                'name': 'y_max_boundary'
+            }
+        ]
+    },
+    
+    # No analytical solution for this example
+    'golden_solution': {
+        'type': 'numerical_reference',
+        'schema_class': ImplicitEulerBCISchema, 
+        'dx_ref': 10.0, # High/fine spatial resolution for reference 
+        'dt_ref': 0.0001 # Fine time resolution for reference 
+    },
+
+    'store_history': False
+}
+
+# 3rd test
 
 cell_centers = []
 tumor_center = np.array([500.0, 500.0, 500.0])
@@ -1144,7 +1220,6 @@ boundary_regions = [
     {'type': 'rectangle', 'origin': (40.0, 40.0, 0.0), 'size': (920.0, 920.0, 40.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'z_min_boundary'},
     {'type': 'rectangle', 'origin': (40.0, 40.0, 960.0), 'size': (920.0, 920.0, 40.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'z_max_boundary'}
 ]
-
 CONVERGENCE_TEST_3 = {
     'name': 'convergence_test_3',
     'description': '3-D diffusion-reaction with bulk sources and grid-aligned cell uptake (BioFVM convergence test 3)',
@@ -1164,11 +1239,161 @@ CONVERGENCE_TEST_3 = {
     
     'boundary_condition': {
         'type': 'neumann',
-        'value': 0.0
+        'flux': 0.0
     },
     
     'bulk': {
         'regions': boundary_regions + cell_regions
+    },
+    
+    'golden_solution': {
+        'type': 'numerical_reference',
+        'schema_class': None,
+        'dx_ref': 10.0,
+        'dt_ref': 0.0001
+    },
+
+    'store_history': False
+}
+
+# 4th test
+
+def generate_hcp_cells(tumor_center, tumor_radius, cell_radius):
+    """Generates Hexagonal Close Packed (HCP) cell centers within a sphere."""
+    centers = []
+    d = 2.0 * cell_radius
+    i_max = int(tumor_radius / d) + 2
+    j_max = int(tumor_radius / (d * np.sqrt(3)/2)) + 2
+    k_max = int(tumor_radius / (d * np.sqrt(6)/3)) + 2
+    for k in range(-k_max, k_max):
+        for j in range(-j_max, j_max):
+            for i in range(-i_max, i_max):
+                x = i * d + (j % 2) * (d / 2.0) + (k % 2) * (d / 2.0)
+                y = j * d * np.sqrt(3.0)/2.0 + (k % 2) * d * np.sqrt(3.0)/6.0
+                z = k * d * np.sqrt(6.0)/3.0
+                pos = np.array([x, y, z]) + tumor_center
+                if np.linalg.norm(pos - tumor_center) <= tumor_radius:
+                    centers.append(pos)
+    return centers
+tumor_center = np.array([500.0, 500.0, 500.0])
+tumor_radius = 400.0
+cell_radius = 5.0 # Radius is 5 μm for Example 4
+cell_centers = generate_hcp_cells(tumor_center, tumor_radius, cell_radius)
+cell_regions = [
+    {
+        'type': 'sphere',
+        'center': tuple(pos),
+        'radius': cell_radius,
+        'linear_rate': -10.0, # Uptake rate U_k = 10 min^-1
+        'name': f'cell_{i}'
+    }
+    for i, pos in enumerate(cell_centers)
+]
+boundary_regions = [
+    {'type': 'rectangle', 'origin': (0.0, 0.0, 0.0), 'size': (40.0, 1000.0, 1000.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'x_min_boundary'},
+    {'type': 'rectangle', 'origin': (960.0, 0.0, 0.0), 'size': (40.0, 1000.0, 1000.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'x_max_boundary'},
+    {'type': 'rectangle', 'origin': (40.0, 0.0, 0.0), 'size': (920.0, 40.0, 1000.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'y_min_boundary'},
+    {'type': 'rectangle', 'origin': (40.0, 960.0, 0.0), 'size': (920.0, 40.0, 1000.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'y_max_boundary'},
+    {'type': 'rectangle', 'origin': (40.0, 40.0, 0.0), 'size': (920.0, 920.0, 40.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'z_min_boundary'},
+    {'type': 'rectangle', 'origin': (40.0, 40.0, 960.0), 'size': (920.0, 920.0, 40.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'z_max_boundary'}
+]
+CONVERGENCE_TEST_4 = {
+    'name': 'convergence_test_4',
+    'description': '3-D diffusion-reaction with bulk sources, off-lattice cell uptake (BioFVM convergence test 4)',
+    
+    'domain_size': (1000.0, 1000.0, 1000.0),
+    'grid_points': (int(1000.0/20), int(1000.0/20), int(1000.0/20)),
+    'dt': 0.01,
+    't_final': 4.0,
+    
+    'diffusion_coefficient': 1e5,
+    'decay_rate': 0.1,
+    
+    'initial_condition': {
+        'type': 'uniform',
+        'value': 38.0
+    },
+    
+    'boundary_condition': {
+        'type': 'neumann',
+        'flux': 0.0
+    },
+    
+    'bulk': {
+        'regions': boundary_regions + cell_regions
+    },
+    
+    'golden_solution': {
+        'type': 'numerical_reference',
+        'schema_class': None,
+        'dx_ref': 10.0,
+        'dt_ref': 0.0001
+    },
+
+    'store_history': False
+}
+
+# 5th test
+
+tumor_center = np.array([500.0, 500.0, 500.0])
+tumor_radius = 400.0
+cell_radius = 5.0 
+uptake_centers = generate_hcp_cells(tumor_center, tumor_radius, cell_radius)
+k1_regions = [
+    {
+        'type': 'sphere',
+        'center': tuple(pos),
+        'radius': cell_radius,
+        'linear_rate': -10.0, # Uptake rate U_k = 10 min^-1
+        'name': f'uptake_cell_{i}'
+    }
+    for i, pos in enumerate(uptake_centers)
+]
+np.random.seed(42) # For reproducibility
+source_centers = np.random.uniform(low=40.0, high=960.0, size=(200, 3))
+k2_regions = [
+    {
+        'type': 'sphere',
+        'center': tuple(pos),
+        'radius': cell_radius,
+        'linear_rate': 10.0, # Supply rate S_k = 10 min^-1
+        'rho_target': 38.0,  # Target saturation
+        'name': f'source_cell_{i}'
+    }
+    for i, pos in enumerate(source_centers)
+]
+boundary_regions = [
+    {'type': 'rectangle', 'origin': (0.0, 0.0, 0.0), 'size': (40.0, 1000.0, 1000.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'x_min_boundary'},
+    {'type': 'rectangle', 'origin': (960.0, 0.0, 0.0), 'size': (40.0, 1000.0, 1000.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'x_max_boundary'},
+    {'type': 'rectangle', 'origin': (40.0, 0.0, 0.0), 'size': (920.0, 40.0, 1000.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'y_min_boundary'},
+    {'type': 'rectangle', 'origin': (40.0, 960.0, 0.0), 'size': (920.0, 40.0, 1000.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'y_max_boundary'},
+    {'type': 'rectangle', 'origin': (40.0, 40.0, 0.0), 'size': (920.0, 920.0, 40.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'z_min_boundary'},
+    {'type': 'rectangle', 'origin': (40.0, 40.0, 960.0), 'size': (920.0, 920.0, 40.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'z_max_boundary'}
+]
+CONVERGENCE_TEST_5 = {
+    'name': 'convergence_test_5',
+    'description': '3-D diffusion-reaction with bulk sources, off-lattice cell uptake and supply (BioFVM convergence test 5)',
+    
+    'domain_size': (1000.0, 1000.0, 1000.0),
+    'grid_points': (int(1000.0/20), int(1000.0/20), int(1000.0/20)),
+    'dt': 0.01,
+    't_final': 4.0,
+    
+    'diffusion_coefficient': 1e5,
+    'decay_rate': 0.1,
+    
+    'initial_condition': {
+        'type': 'uniform',
+        'value': 38.0
+    },
+    
+    'boundary_condition': {
+        'type': 'neumann',
+        'flux': 0.0
+    },
+    
+    'bulk': {
+        'regions': boundary_regions + k1_regions + k2_regions
     },
     
     'golden_solution': {
@@ -1432,6 +1657,7 @@ def get_scenario_by_name(name: str) -> Dict[str, Any]:
         'single_tumor_2d': SINGLE_TUMOR_2D,
         'multiple_tumor_2d': MULTIPLE_TUMOR_2D,
         'convergence_test_2': CONVERGENCE_TEST_2,
+        'convergence_test_2_2D': CONVERGENCE_TEST_2_2D,
         'convergence_test_3': CONVERGENCE_TEST_3
     }
     
