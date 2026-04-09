@@ -6,6 +6,7 @@ second-order Peaceman-Rachford formulation.
 """
 
 import numpy as np
+import warnings
 from scipy.sparse import diags, eye, csr_matrix
 from scipy.sparse.linalg import spsolve
 from diffusion_schemas.base import Schema
@@ -178,7 +179,7 @@ class ADIBCSchema(Schema):
             rhs = self.state + self.dt * source
             Ax = self.system_matrix.copy().tolil()
             rhs = rhs.reshape(self.grid_points[0], 1)
-            rhs = self._apply_bc_to_sweep(Ax, rhs, self.dx[0], self.dt)
+            rhs = self._apply_bc_to_sweep(Ax, rhs, self.dx[0], self.dt, t_eval=self.t + self.dt)
             self.state = spsolve(Ax.tocsr(), rhs).reshape(self.grid_points)
 
         # --------------------- 2D CASE (Peaceman-Rachford WITH IMPLICIT SOURCE) ---------------------
@@ -207,7 +208,7 @@ class ADIBCSchema(Schema):
                 rhs_1[:, -1] += explicit_y_forcing
 
             LHS_x_lil = LHS_x.copy().tolil()
-            rhs_1 = self._apply_bc_to_sweep(LHS_x_lil, rhs_1, dx, dt_half)
+            rhs_1 = self._apply_bc_to_sweep(LHS_x_lil, rhs_1, dx, dt_half, t_eval=self.t + dt_half)
             u_star = spsolve(LHS_x_lil.tocsr(), rhs_1)
 
             # Enforce all Dirichlet boundaries on intermediate solution
@@ -228,7 +229,7 @@ class ADIBCSchema(Schema):
 
             rhs_2_T = rhs_2.T
             LHS_y_lil = LHS_y.copy().tolil()
-            rhs_2_T = self._apply_bc_to_sweep(LHS_y_lil, rhs_2_T, dy, self.dt)
+            rhs_2_T = self._apply_bc_to_sweep(LHS_y_lil, rhs_2_T, dy, dt_half, t_eval=self.t + self.dt)
             u_new_T = spsolve(LHS_y_lil.tocsr(), rhs_2_T)
 
             # Enforce all Dirichlet boundaries on final solution
@@ -277,7 +278,7 @@ class ADIBCSchema(Schema):
             
             rhs_1_x = rhs_1.reshape(Nx, Ny * Nz)
             LHS_x_lil = LHS_x.copy().tolil()
-            rhs_1_x = self._apply_bc_to_sweep(LHS_x_lil, rhs_1_x, dx, dt_third)
+            rhs_1_x = self._apply_bc_to_sweep(LHS_x_lil, rhs_1_x, dx, dt_third, t_eval=self.t + dt_third)
             u_star = spsolve(LHS_x_lil.tocsr(), rhs_1_x).reshape(Nx, Ny, Nz)
 
             # Enforce all Dirichlet boundaries on intermediate solution
@@ -303,7 +304,7 @@ class ADIBCSchema(Schema):
             
             rhs_2_y = rhs_2.transpose(1, 0, 2).reshape(Ny, Nx * Nz)
             LHS_y_lil = LHS_y.copy().tolil()
-            rhs_2_y = self._apply_bc_to_sweep(LHS_y_lil, rhs_2_y, dy, dt_third)
+            rhs_2_y = self._apply_bc_to_sweep(LHS_y_lil, rhs_2_y, dy, dt_third, t_eval=self.t + 2 * dt_third)
             u_star_star = spsolve(LHS_y_lil.tocsr(), rhs_2_y).reshape(Ny, Nx, Nz).transpose(1, 0, 2)
 
             # Enforce all Dirichlet boundaries on intermediate solution
@@ -329,7 +330,7 @@ class ADIBCSchema(Schema):
             
             rhs_3_z = rhs_3.transpose(2, 0, 1).reshape(Nz, Nx * Ny)
             LHS_z_lil = LHS_z.copy().tolil()
-            rhs_3_z = self._apply_bc_to_sweep(LHS_z_lil, rhs_3_z, dz, dt_third)
+            rhs_3_z = self._apply_bc_to_sweep(LHS_z_lil, rhs_3_z, dz, dt_third, t_eval=self.t + self.dt)
             u_final_z = spsolve(LHS_z_lil.tocsr(), rhs_3_z).reshape(Nz, Nx, Ny).transpose(1, 2, 0)
 
             # Enforce all Dirichlet boundaries on final solution
@@ -343,14 +344,15 @@ class ADIBCSchema(Schema):
         
         self.t += self.dt
 
-    def _apply_bc_to_sweep(self, matrix, rhs_array: np.ndarray, h: float, dt_sweep: float) -> np.ndarray:
+    def _apply_bc_to_sweep(self, matrix, rhs_array: np.ndarray, h: float, dt_sweep: float, t_eval: float = None) -> np.ndarray:
         if self._boundary_conditions is None:
             return rhs_array
 
         D = self.diffusion_coefficient
+        bc_time = self.t + dt_sweep if t_eval is None else t_eval
         
         if isinstance(self._boundary_conditions, NeumannBC):
-            flux = self._boundary_conditions._get_flux(self.t + dt_sweep)
+            flux = self._boundary_conditions._get_flux(bc_time)
             
             alpha = (dt_sweep * D) / (h**2)
             forcing = (2 * dt_sweep * D * flux) / h
@@ -362,7 +364,7 @@ class ADIBCSchema(Schema):
             rhs_array[-1, :] += forcing
 
         elif isinstance(self._boundary_conditions, DirichletBC):
-            val = self._boundary_conditions._get_value(self.t + dt_sweep)
+            val = self._boundary_conditions._get_value(bc_time)
             
             matrix[0, :] = 0
             matrix[0, 0] = 1
@@ -379,6 +381,11 @@ class ADIBCSchema(Schema):
             # rhs_array[:, -1] = val
             
         return rhs_array
+
+    def set_boundary_conditions(self, boundary_conditions) -> None:
+        super().set_boundary_conditions(boundary_conditions)
+        # ADI operators include BC-dependent stencil terms and must be rebuilt.
+        self._build_system_matrix()
 
     def set_diffusion_coefficient(self, value: float) -> None:
         super().set_diffusion_coefficient(value)
