@@ -495,7 +495,7 @@ def multiple_tumor():
     base_scenario["t_final"] = 10
     
     dx_values = [20]
-    dt_values = [1e-3, 5e-3, 1e-2, 5e-2, 0.1, 0.2, 0.3, 0.4, 0.5, 1, 2, 3, 4, 5]
+    dt_values = [1e-2, 5e-2, 0.1, 0.2, 0.3, 0.4, 0.5, 1, 2, 3, 4, 5]
     scenarios = []
 
     for dt in dt_values:
@@ -522,13 +522,14 @@ def multiple_tumor():
     runner = BenchmarkRunner()
 
     # runner.add_schema(ExplicitEulerBCSchema, "Explicit Euler")
-    runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
-    runner.add_schema(ImplicitEulerBCISchema, "Implicit Euler with Implicit Source")
-    runner.add_schema(ImplicitEulerBCOSSchema, "Implicit Euler with Operator Splitting")
-    runner.add_schema(ImplicitLODBCSchema, "Implicit LOD")
+    # runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
+    # runner.add_schema(ImplicitEulerBCISchema, "Implicit Euler with Implicit Source")
+    # runner.add_schema(ImplicitEulerBCOSSchema, "Implicit Euler with Operator Splitting")
+    # runner.add_schema(ImplicitLODBCSchema, "Implicit LOD")
     # runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
     # runner.add_schema(CrankNicolsonLODBCSchema, "Crank-Nicolson LOD")
-    # runner.add_schema(ADIBCSchema, "ADI")
+    runner.add_schema(ADIBCSchema, "ADI")
+    runner.add_schema(ADIBCISchema, "ADI with Implicit Source")
 
     for scenario in scenarios:
         runner.add_scenario(scenario)
@@ -544,19 +545,19 @@ def multiple_tumor():
         generate_plots=True
     )
     
-    summary = runner.generate_summary_report(
-        output_path='benchmark_results/multiple_tumor/summary_implicits.csv'
-    )
+    # summary = runner.generate_summary_report(
+    #     output_path='benchmark_results/multiple_tumor/summary.csv'
+    # )
 
-    return results, summary
+    return results, None
 
 def dt_threshold_test():
 
     print("\n" + "=" * 70)
-    print("Multiple Tumor 2D - dt Threshold Search (5% error)")
+    print("dt Threshold Search (5% error)")
     print("=" * 70)
 
-    base_scenario = copy.deepcopy(get_scenario_by_name('convergence_test_2'))
+    base_scenario = copy.deepcopy(get_scenario_by_name('convergence_test_2_2D'))
     base_scenario["store_history"] = False
 
     runner = BenchmarkRunner()
@@ -572,27 +573,40 @@ def dt_threshold_test():
     runner.add_schema(ADIBCSchema, "ADI")
     runner.add_schema(ADIBCISchema, "ADI with Implicit Source")
 
-    results1 = runner.run_dt_threshold_search(
-        scenario_base=base_scenario,
-        target_error=0.05,
-        growth_factor=1.5,
-        max_iterations=20,
-        dt_start=1e-2,
-        dt_max=5.0,
-        output_dir='benchmark_results/convergence_test_2/dt_threshold_search',
-        output_csv='benchmark_results/convergence_test_2/dt_threshold_summary.csv'
-    )
+    dx = 20
+    base_scenario["grid_points"] = tuple(int(s / dx) for s in base_scenario["domain_size"])
+    dt = 0.1
+    base_scenario["dt"] = dt
+    base_scenario["name"] = f"convergence_test_2_2d_dx{dx}_dt{dt}".replace(".", "")
     
-    # Additional: run dt-eval grid for fixed dt values
-    dt_values = [1, 1e-1, 1e-2, 1e-3]
-    eval_times = [0.5, 1, 2, 3, 4]
+    # results1 = runner.run_dt_threshold_search(
+    #     scenario_base=base_scenario,
+    #     target_error=0.05,
+    #     growth_factor=1.5,
+    #     max_iterations=50,
+    #     dt_start=1e-4, # re-run with lower dt_start if some schemes do not converge
+    #     dt_max=5.0,
+    #     output_dir='benchmark_results/convergence_test_2_2d/dt_threshold_search_dx20',
+    #     output_csv='benchmark_results/convergence_test_2_2d/dt_threshold_summary_dx20.csv',
+    #     generate_plots=True
+    # )
+    
+    # dt_values = [1, 1e-1, 1e-2, 1e-3]
+    # eval_times = [0.5, 1, 2, 3, 4]
+    # results2 = runner.run_dt_eval_times_grid(
+    #     scenario_base=base_scenario,
+    #     dt_values=dt_values,
+    #     eval_times=eval_times,
+    #     output_dir='benchmark_results/convergence_test_2_2d/dt_eval_grid_dx20',
+    #     output_csv='benchmark_results/convergence_test_2_2d/dt_eval_grid_summary_dx20.csv',
+    #     generate_plots=True
+    # )
 
-    results2 = runner.run_dt_eval_times_grid(
-        scenario_base=base_scenario,
-        dt_values=dt_values,
-        eval_times=eval_times,
-        output_dir='benchmark_results/convergence_test_2/dt_eval_grid',
-        output_csv='benchmark_results/convergence_test_2/dt_eval_grid_summary.csv'
+    runner.add_scenario(scenario=base_scenario)
+    results = runner.run(
+        output_dir='benchmark_results/convergence_test_2_2d/test',
+        store_history=True,
+        generate_plots=True
     )
 
     return None, None
