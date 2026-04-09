@@ -201,8 +201,10 @@ class CrankNicolsonBCISchema(Schema):
             bulk_rhs_np1 = self._bulk.rhs_contribution
             bulk_lhs_np1 = self._bulk.lhs_contribution
             lhs = bulk_lhs_np1.ravel().copy()
-            # Preserve BC-imposed rows by not changing boundary diagonal entries.
-            lhs[self._boundary_idx] = 0.0
+            # Only Dirichlet rows are identity-constrained; 
+            # keep Neumann boundary source contributions active
+            if isinstance(self._boundary_conditions, DirichletBC):
+                lhs[self._boundary_idx] = 0.0
         else:
             lhs = np.zeros_like(self.state)
     

@@ -166,7 +166,10 @@ class ImplicitLODBCISchema(Schema):
             source_rhs = self._bulk.rhs_contribution
             source_lhs = self._bulk.lhs_contribution
 
-            source_lhs[self._boundary_mask] = 0.0
+            # Only Dirichlet rows are identity-constrained; 
+            # keep Neumann boundary source contributions active
+            if isinstance(self._boundary_conditions, DirichletBC):
+                source_lhs[self._boundary_mask] = 0.0
 
         # Right-hand side: u^n + dt*(S_explicit + S_rhs)
         rhs = self.state.flatten() + self.dt * (source_explicit.flatten() + source_rhs.flatten())

@@ -186,8 +186,10 @@ class CrankNicolsonLODBCISchema(Schema):
         if self._bulk is not None:
             bulk_rhs_np1 = self._bulk.rhs_contribution
             bulk_lhs_np1 = self._bulk.lhs_contribution.copy()
-            # Preserve BC-imposed rows by not changing boundary diagonal entries.
-            bulk_lhs_np1[self._boundary_mask] = 0.0
+            # Only Dirichlet rows are identity-constrained; 
+            # keep Neumann boundary source contributions active
+            if isinstance(self._boundary_conditions, DirichletBC):
+                bulk_lhs_np1[self._boundary_mask] = 0.0
 
         # 1. Compute Explicit Part (Right-Hand Side)
         # We integrate the Explicit BC logic here using modified stencils

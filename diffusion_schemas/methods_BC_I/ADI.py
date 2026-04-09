@@ -207,14 +207,15 @@ class ADIBCISchema(Schema):
             if self._bulk is not None:
                 source_rhs = self._bulk.rhs_contribution
                 source_lhs = self._bulk.lhs_contribution
-                source_lhs[self._boundary_mask] = 0.0
+                if isinstance(self._boundary_conditions, DirichletBC):
+                    source_lhs[self._boundary_mask] = 0.0
 
             rhs = self.state + self.dt * (source_rhs + source_explicit)
 
             source_diag = diags([self.dt * source_lhs], [0], shape=(N, N), format='csr')
             Ax = (self.system_matrix + source_diag).tolil()
             rhs = rhs.reshape(N, 1)
-            rhs = self._apply_bc_to_sweep(Ax, rhs, self.dx[0], self.dt)
+            rhs = self._apply_bc_to_sweep(Ax, rhs, self.dx[0], self.dt, t_eval=t_next)
             self.state = spsolve(Ax.tocsr(), rhs).reshape(self.grid_points)
 
             if isinstance(self._boundary_conditions, DirichletBC):
@@ -244,7 +245,8 @@ class ADIBCISchema(Schema):
                 source_lhs = self._bulk.lhs_contribution
 
                 # Ignore boundary values for the implicit source term since they will be overwritten by BC enforcement
-                source_lhs[self._boundary_mask] = 0.0
+                if isinstance(self._boundary_conditions, DirichletBC):
+                    source_lhs[self._boundary_mask] = 0.0
 
             rhs_1 = (RHS_y @ self.state.T).T + dt_half * (source_rhs + source_explicit)
 
@@ -266,7 +268,7 @@ class ADIBCISchema(Schema):
                 rhs_1_j = rhs_1[:, j].reshape(Nx, 1)
                 
                 # Apply boundary conditions
-                rhs_1_j = self._apply_bc_to_sweep(LHS_x_j, rhs_1_j, dx, dt_half)
+                rhs_1_j = self._apply_bc_to_sweep(LHS_x_j, rhs_1_j, dx, dt_half, t_eval=t_mid)
                 
                 # Solve and store
                 u_star[:, j] = spsolve(LHS_x_j.tocsr(), rhs_1_j).flatten()
@@ -284,7 +286,8 @@ class ADIBCISchema(Schema):
             if self._bulk is not None:  
                 source_rhs = self._bulk.rhs_contribution
                 source_lhs = self._bulk.lhs_contribution
-                source_lhs[self._boundary_mask] = 0.0
+                if isinstance(self._boundary_conditions, DirichletBC):
+                    source_lhs[self._boundary_mask] = 0.0
             rhs_2 = (RHS_x @ u_star) + dt_half * (source_rhs + source_explicit)
 
             # Add explicit transverse Neumann forcing (x-direction)
@@ -305,7 +308,7 @@ class ADIBCISchema(Schema):
                 rhs_2_i = rhs_2[i, :].reshape(Ny, 1)
                 
                 # Apply boundary conditions
-                rhs_2_i = self._apply_bc_to_sweep(LHS_y_i, rhs_2_i, dy, dt_half)
+                rhs_2_i = self._apply_bc_to_sweep(LHS_y_i, rhs_2_i, dy, dt_half, t_eval=self.t + self.dt)
                 
                 # Solve and store
                 u_new[i, :] = spsolve(LHS_y_i.tocsr(), rhs_2_i).flatten()
@@ -338,7 +341,8 @@ class ADIBCISchema(Schema):
             if self._bulk is not None:
                 source_rhs = self._bulk.rhs_contribution
                 source_lhs = self._bulk.lhs_contribution
-                source_lhs[self._boundary_mask] = 0.0
+                if isinstance(self._boundary_conditions, DirichletBC):
+                    source_lhs[self._boundary_mask] = 0.0
 
             rhs_y = (RHS_y @ self.state.transpose(1, 0, 2).reshape(Ny, Nx * Nz)).reshape(Ny, Nx, Nz).transpose(1, 0, 2)
             rhs_z = (RHS_z @ self.state.transpose(2, 0, 1).reshape(Nz, Nx * Ny)).reshape(Nz, Nx, Ny).transpose(1, 2, 0)
@@ -357,7 +361,7 @@ class ADIBCISchema(Schema):
                     source_diag = diags([dt_third * source_lhs[:, j, k]], [0], shape=(Nx, Nx), format='csr')
                     LHS_x_jk = (LHS_x + source_diag).tolil()
                     rhs_1_jk = rhs_1[:, j, k].reshape(Nx, 1)
-                    rhs_1_jk = self._apply_bc_to_sweep(LHS_x_jk, rhs_1_jk, dx, dt_third)
+                    rhs_1_jk = self._apply_bc_to_sweep(LHS_x_jk, rhs_1_jk, dx, dt_third, t_eval=t_1)
                     u_star[:, j, k] = spsolve(LHS_x_jk.tocsr(), rhs_1_jk).flatten()
 
             if isinstance(self._boundary_conditions, DirichletBC):
@@ -373,7 +377,8 @@ class ADIBCISchema(Schema):
             if self._bulk is not None:
                 source_rhs = self._bulk.rhs_contribution
                 source_lhs = self._bulk.lhs_contribution
-                source_lhs[self._boundary_mask] = 0.0
+                if isinstance(self._boundary_conditions, DirichletBC):
+                    source_lhs[self._boundary_mask] = 0.0
 
             rhs_x = (RHS_x @ u_star).reshape(Nx, Ny, Nz)
             rhs_z = (RHS_z @ u_star.transpose(2, 0, 1).reshape(Nz, Nx * Ny)).reshape(Nz, Nx, Ny).transpose(1, 2, 0)
@@ -392,7 +397,7 @@ class ADIBCISchema(Schema):
                     source_diag = diags([dt_third * source_lhs[i, :, k]], [0], shape=(Ny, Ny), format='csr')
                     LHS_y_ik = (LHS_y + source_diag).tolil()
                     rhs_2_ik = rhs_2[i, :, k].reshape(Ny, 1)
-                    rhs_2_ik = self._apply_bc_to_sweep(LHS_y_ik, rhs_2_ik, dy, dt_third)
+                    rhs_2_ik = self._apply_bc_to_sweep(LHS_y_ik, rhs_2_ik, dy, dt_third, t_eval=t_2)
                     u_star_star[i, :, k] = spsolve(LHS_y_ik.tocsr(), rhs_2_ik).flatten()
 
             if isinstance(self._boundary_conditions, DirichletBC):
@@ -408,7 +413,8 @@ class ADIBCISchema(Schema):
             if self._bulk is not None:
                 source_rhs = self._bulk.rhs_contribution
                 source_lhs = self._bulk.lhs_contribution
-                source_lhs[self._boundary_mask] = 0.0
+                if isinstance(self._boundary_conditions, DirichletBC):
+                    source_lhs[self._boundary_mask] = 0.0
 
             rhs_x = (RHS_x @ u_star_star).reshape(Nx, Ny, Nz)
             rhs_y = (RHS_y @ u_star_star.transpose(1, 0, 2).reshape(Ny, Nx * Nz)).reshape(Ny, Nx, Nz).transpose(1, 0, 2)
@@ -427,7 +433,7 @@ class ADIBCISchema(Schema):
                     source_diag = diags([dt_third * source_lhs[i, j, :]], [0], shape=(Nz, Nz), format='csr')
                     LHS_z_ij = (LHS_z + source_diag).tolil()
                     rhs_3_ij = rhs_3[i, j, :].reshape(Nz, 1)
-                    rhs_3_ij = self._apply_bc_to_sweep(LHS_z_ij, rhs_3_ij, dz, dt_third)
+                    rhs_3_ij = self._apply_bc_to_sweep(LHS_z_ij, rhs_3_ij, dz, dt_third, t_eval=t_3)
                     u_new[i, j, :] = spsolve(LHS_z_ij.tocsr(), rhs_3_ij).flatten()
 
             if isinstance(self._boundary_conditions, DirichletBC):
@@ -440,14 +446,15 @@ class ADIBCISchema(Schema):
 
         self.t += self.dt
 
-    def _apply_bc_to_sweep(self, matrix, rhs_array: np.ndarray, h: float, dt_sweep: float) -> np.ndarray:
+    def _apply_bc_to_sweep(self, matrix, rhs_array: np.ndarray, h: float, dt_sweep: float, t_eval: float = None) -> np.ndarray:
         if self._boundary_conditions is None:
             return rhs_array
 
         D = self.diffusion_coefficient
+        bc_time = self.t + dt_sweep if t_eval is None else t_eval
         
         if isinstance(self._boundary_conditions, NeumannBC):
-            flux = self._boundary_conditions._get_flux(self.t + dt_sweep)
+            flux = self._boundary_conditions._get_flux(bc_time)
             
             alpha = (dt_sweep * D) / (h**2)
             forcing = (2 * dt_sweep * D * flux) / h
@@ -459,7 +466,7 @@ class ADIBCISchema(Schema):
             rhs_array[-1, :] += forcing
 
         elif isinstance(self._boundary_conditions, DirichletBC):
-            val = self._boundary_conditions._get_value(self.t + dt_sweep)
+            val = self._boundary_conditions._get_value(bc_time)
             
             matrix[0, :] = 0
             matrix[0, 0] = 1
@@ -469,6 +476,11 @@ class ADIBCISchema(Schema):
             matrix[-1, -1] = 1
             rhs_array[-1, :] = val            
         return rhs_array
+
+    def set_boundary_conditions(self, boundary_conditions) -> None:
+        super().set_boundary_conditions(boundary_conditions)
+        # ADI operators include BC-dependent stencil terms and must be rebuilt.
+        self._build_system_matrix()
 
     def set_diffusion_coefficient(self, value: float) -> None:
         super().set_diffusion_coefficient(value)
