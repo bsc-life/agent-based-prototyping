@@ -213,7 +213,6 @@ class ImplicitEulerBCOSSchema(Schema):
                
         S_rhs = self._bulk.rhs_contribution.copy()
         S_lhs = self._bulk.lhs_contribution.copy()
-        S_lhs.flat[self._boundary_idx] = 0.0  
         
         # Point-wise implicit update across the entire grid simultaneously
         self.state = (self.state + self.dt * S_rhs) / (1.0 + self.dt * S_lhs)
