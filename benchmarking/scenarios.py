@@ -9,7 +9,7 @@ the analytical solution for validation.
 
 import numpy as np
 from typing import Dict, Any, List, Union, Tuple, Callable
-from diffusion_schemas.methods_BC_I.implicit import ImplicitEulerBCISchema
+from diffusion_schemas import ImplicitEulerBCISchema
 from diffusion_schemas.utils.initial_conditions import gaussian, uniform, step_function, checkerboard, sphere, sine
 from diffusion_schemas.utils.boundary import (
     DirichletBC, NeumannBC, PeriodicBC, RobinBC, BoundaryCondition
@@ -1132,8 +1132,12 @@ CONVERGENCE_TEST_2_2D = {
     
     'boundary_condition': {
         'type': 'neumann',
-        'value': 0.0 # D∇ρ·n = 0
+        'flux': 0.0 # D∇ρ·n = 0
     },
+    # 'boundary_condition': {
+    #     'type': 'dirichlet',
+    #     'value': 38.0 # ρ = 38 mmHg at boundaries
+    # },
     
     'bulk': {
         'regions': [
@@ -1410,8 +1414,6 @@ CONVERGENCE_TEST_5 = {
 # Complex examples
 # ==============================================================================
 
-from diffusion_schemas.methods_BC import ImplicitLODBCSchema
-
 SINGLE_TUMOR_2D = {
     'name': 'single_tumor_2d',
     'description': '2D diffusion with decay and a single tumor region secreting continuously',
@@ -1450,9 +1452,9 @@ SINGLE_TUMOR_2D = {
     # No analytical solution for this complex scenario
     'golden_solution': {
         'type': 'numerical_reference',
-        'schema_class': None, # Will use ImplicitLODBCSchema by default
+        'schema_class': ImplicitEulerBCISchema, # Will use ImplicitLODBCSchema by default
         'dx_ref': 10.0, # Finer spatial resolution for reference
-        'dt_ref': 0.0001
+        'dt_ref': 0.0005
         # Maybe storing here store_history?
     },
 
@@ -1657,7 +1659,7 @@ def get_scenario_by_name(name: str) -> Dict[str, Any]:
         'single_tumor_2d': SINGLE_TUMOR_2D,
         'multiple_tumor_2d': MULTIPLE_TUMOR_2D,
         'convergence_test_2': CONVERGENCE_TEST_2,
-        'convergence_test_2_2D': CONVERGENCE_TEST_2_2D,
+        'convergence_test_2_2d': CONVERGENCE_TEST_2_2D,
         'convergence_test_3': CONVERGENCE_TEST_3
     }
     

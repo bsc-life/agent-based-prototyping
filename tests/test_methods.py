@@ -4,6 +4,7 @@ import pytest
 import numpy as np
 from diffusion_schemas import ExplicitEulerSchema, ImplicitEulerSchema, CrankNicolsonSchema
 from diffusion_schemas.utils import gaussian, DirichletBC, NeumannBC
+from diffusion_schemas.utils.bulk import Bulk, TargetRegion, RectangleRegion
 
 
 class TestExplicitEuler:

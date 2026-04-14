@@ -477,6 +477,60 @@ def single_tumor_gradual():
     
     return results, summary
 
+def convergence_test_2_2D():
+
+    print("\n" + "=" * 70)
+    print("Convergence Test 2 2D Benchmarking")
+    print("=" * 70)
+
+    base_scenario = copy.deepcopy(get_scenario_by_name('convergence_test_2_2D'))
+    store=True
+    base_scenario["store_history"] = store
+    base_scenario["t_final"] = 4
+    base_scenario["grid_points"] = tuple(int(s / 20) for s in base_scenario["domain_size"])
+    base_scenario["golden_solution"]["dt_ref"] = 0.001
+    base_scenario["golden_solution"]["schema_class"] = ImplicitEulerBCISchema
+    # a lambda funciton makes the golden solution hash change every time
+
+    # dt_values = [0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.01]
+    dt_values = [0.5, 0.1, 0.01]
+    scenarios = []
+    
+    for dt in dt_values:
+        scenario = copy.deepcopy(base_scenario)
+        scenario["dt"] = dt
+        scenario["name"] = f"convergence_test_2_2D_dt{dt}".replace(".", "")
+        scenarios.append(scenario)
+    
+    runner = BenchmarkRunner()
+    # runner.add_schema(ExplicitEulerBCSchema, "Explicit Euler")
+    runner.add_schema(ImplicitEulerBCSchema, "Implicit Euler")
+    runner.add_schema(ImplicitEulerBCISchema, "Implicit Euler with Implicit Source")
+    runner.add_schema(ImplicitEulerBCOSSchema, "Implicit Euler with Operator Splitting")
+    # runner.add_schema(ImplicitLODBCSchema, "Implicit LOD")
+    # runner.add_schema(ImplicitLODBCISchema, "Implicit LOD with Implicit Source")
+    # runner.add_schema(CrankNicolsonBCSchema, "Crank-Nicolson")
+    # runner.add_schema(CrankNicolsonBCISchema, "Crank-Nicolson with Implicit Source")
+    # runner.add_schema(CrankNicolsonLODBCSchema, "Crank-Nicolson LOD")
+    # runner.add_schema(CrankNicolsonLODBCISchema, "Crank-Nicolson LOD with Implicit Source")
+    # runner.add_schema(ADIBCSchema, "ADI")
+    # runner.add_schema(ADIBCISchema, "ADI with Implicit Source")
+    
+    for scenario in scenarios:
+        runner.add_scenario(scenario)
+    
+    results = runner.run(
+        output_dir='benchmark_results/convergence_test_2_2D',
+        store_history=store,
+        generate_plots=True
+    )
+    
+    summary = runner.generate_summary_report(
+        output_path='benchmark_results/convergence_test_2_2D/summary_dt_dx20_t10.csv'
+    )
+    
+    return results, summary
+
 def multiple_tumor():
 
     print("\n" + "=" * 70)
@@ -694,7 +748,7 @@ def dynamic_tumor():
 
 def main():
 
-    results, summary = dt_threshold_test()
+    results, summary = convergence_test_2_2D()
 
 if __name__ == "__main__":
     main()

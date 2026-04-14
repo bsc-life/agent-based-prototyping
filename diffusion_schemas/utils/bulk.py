@@ -546,13 +546,13 @@ class Bulk:
             if isinstance(region, NetRegion) and callable(region.net_rate):
                 all_constant = False
                 break
-            elif isinstance(region, LinearRegion) and callable(region.linear_rate):
-                all_constant = False
-                break
             elif isinstance(region, TargetRegion):
                 if callable(region.linear_rate) or callable(region.rho_target):
                     all_constant = False
                     break
+            elif isinstance(region, LinearRegion) and callable(region.linear_rate):
+                all_constant = False
+                break
         if self._precomputed and all_constant:
             return
         self._precomputed = True
