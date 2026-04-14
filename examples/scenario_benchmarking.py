@@ -557,7 +557,7 @@ def dt_threshold_test():
     print("dt Threshold Search (5% error)")
     print("=" * 70)
 
-    base_scenario = copy.deepcopy(get_scenario_by_name('convergence_test_2_2D'))
+    base_scenario = copy.deepcopy(get_scenario_by_name('convergence_test_2_2d'))
     base_scenario["store_history"] = False
 
     runner = BenchmarkRunner()
@@ -575,39 +575,45 @@ def dt_threshold_test():
 
     dx = 20
     base_scenario["grid_points"] = tuple(int(s / dx) for s in base_scenario["domain_size"])
-    dt = 0.1
+    dt = 0.001
     base_scenario["dt"] = dt
     base_scenario["name"] = f"convergence_test_2_2d_dx{dx}_dt{dt}".replace(".", "")
     
+    # Single tumor scenario adaptation to check whether target bulks are a problem
+    # Change bulk to target bulk and check if accuracy is not dx-dt limited
+    # base_scenario["bulk"]["regions"][0]["linear_rate"] = 38.0
+    # base_scenario["bulk"]["regions"][0]["rho_target"] = 38.0
+    # base_scenario["t_final"] = 10
+
     # results1 = runner.run_dt_threshold_search(
     #     scenario_base=base_scenario,
     #     target_error=0.05,
     #     growth_factor=1.5,
     #     max_iterations=50,
-    #     dt_start=1e-4, # re-run with lower dt_start if some schemes do not converge
+    #     dt_start=5e-3, # re-run with lower dt_start if some schemes do not converge
     #     dt_max=5.0,
-    #     output_dir='benchmark_results/convergence_test_2_2d/dt_threshold_search_dx20',
-    #     output_csv='benchmark_results/convergence_test_2_2d/dt_threshold_summary_dx20.csv',
+    #     output_dir=f'benchmark_results/convergence_test_2_2d_adi/dt_threshold_search_dx{dx}',
+    #     output_csv=f'benchmark_results/convergence_test_2_2d_adi/dt_threshold_summary_dx{dx}.csv',
     #     generate_plots=True
     # )
     
-    # dt_values = [1, 1e-1, 1e-2, 1e-3]
-    # eval_times = [0.5, 1, 2, 3, 4]
-    # results2 = runner.run_dt_eval_times_grid(
-    #     scenario_base=base_scenario,
-    #     dt_values=dt_values,
-    #     eval_times=eval_times,
-    #     output_dir='benchmark_results/convergence_test_2_2d/dt_eval_grid_dx20',
-    #     output_csv='benchmark_results/convergence_test_2_2d/dt_eval_grid_summary_dx20.csv',
-    #     generate_plots=True
-    # )
-
-    runner.add_scenario(scenario=base_scenario)
-    results = runner.run(
-        output_dir='benchmark_results/convergence_test_2_2d/test',
-        store_history=True,
+    dt_values = [1, 1e-1, 1e-2, 1e-3]
+    eval_times = [0.5, 1, 2, 3, 4]
+    results2 = runner.run_dt_eval_times_grid(
+        scenario_base=base_scenario,
+        dt_values=dt_values,
+        eval_times=eval_times,
+        output_dir=f'benchmark_results/convergence_test_2_2d_adi/dt_eval_grid_dx{dx}',
+        output_csv=f'benchmark_results/convergence_test_2_2d_adi/dt_eval_grid_summary_dx{dx}.csv',
         generate_plots=True
     )
+
+    # runner.add_scenario(scenario=base_scenario)
+    # results = runner.run(
+    #     output_dir='benchmark_results/single_tumor/',
+    #     store_history=True,
+    #     generate_plots=True
+    # )
 
     return None, None
 
