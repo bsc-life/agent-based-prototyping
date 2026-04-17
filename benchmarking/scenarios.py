@@ -956,15 +956,23 @@ SINE_DECAY_1D = {
     }
 }
 
-COSINE_DIFFUSION_1D = {
+
+
+# ==============================================================================
+# BioFVM CONVERGENCE TESTS
+# ==============================================================================
+
+# 1st test
+
+CONVERGENCE_TEST_1 = {
     # BioFVM convergence test 1: 1D diffusion with cosine initial condition and zero-flux boundaries
-    'name': 'cosine_diffusion_1d',
+    'name': 'convergence_test_1',
     'description': '1-D diffusion with analytical solution (BioFVM convergence test 1)',
     
-    'domain_size': 1000, # L0 = 500 um
-    'grid_points': int(1000 / 5), # dx = 5 um
+    'domain_size': (1000,), # L0 = 500 um
+    'grid_points': (int(1000 / 5),), # dx = 5 um
     'dt': 0.00001,
-    't_final': 2,
+    't_final': 5,
     
     'diffusion_coefficient': 1e5,
     'decay_rate': 0.0,
@@ -987,7 +995,7 @@ COSINE_DIFFUSION_1D = {
 COSINE_DIFFUSION_2D = {
     # BioFVM convergence test 1: 1D diffusion with cosine initial condition and zero-flux boundaries
     'name': 'cosine_diffusion_2d',
-    'description': 'First convergence test',
+    'description': 'First convergence test adapted to 2D',
     
     'domain_size': (1000.0, 1000.0),
     'grid_points': (int(1000 / 5), int(1000 / 5)),
@@ -1015,10 +1023,6 @@ COSINE_DIFFUSION_2D = {
         (1.0 + np.cos(np.pi * (np.asarray(y)-500) / 500) * np.exp(- np.pi**2 * 1e5 / 500**2 * t))
     )
 }
-
-# ==============================================================================
-# BioFVM CONVERGENCE TESTS
-# ==============================================================================
 
 # 2nd test
 
@@ -1260,6 +1264,69 @@ CONVERGENCE_TEST_3 = {
     'store_history': False
 }
 
+ct3_2d_cell_centers = []
+ct3_2d_tumor_center = np.array([500.0, 500.0])
+ct3_2d_tumor_radius = 400.0
+ct3_2d_coords = np.arange(5.0, 1000.0, 10.0)
+for x in ct3_2d_coords:
+    for y in ct3_2d_coords:
+        pos = np.array([x, y])
+        if np.linalg.norm(pos - ct3_2d_tumor_center) <= ct3_2d_tumor_radius:
+            ct3_2d_cell_centers.append((x, y))
+# Each cell occupies one 10um x 10um voxel (dx = dy = 10um).
+ct3_2d_cell_size = (10.0, 10.0)
+ct3_2d_cell_regions = [
+    {
+        'type': 'rectangle',
+        'origin': (pos[0] - 5.0, pos[1] - 5.0),
+        'size': ct3_2d_cell_size,
+        'linear_rate': -10.0,
+        'name': f'cell_{i}'
+    }
+    for i, pos in enumerate(ct3_2d_cell_centers)
+]
+ct3_2d_boundary_regions = [
+    {'type': 'rectangle', 'origin': (0.0, 0.0), 'size': (40.0, 1000.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'x_min_boundary'},
+    {'type': 'rectangle', 'origin': (960.0, 0.0), 'size': (40.0, 1000.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'x_max_boundary'},
+    {'type': 'rectangle', 'origin': (40.0, 0.0), 'size': (920.0, 40.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'y_min_boundary'},
+    {'type': 'rectangle', 'origin': (40.0, 960.0), 'size': (920.0, 40.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'y_max_boundary'}
+]
+CONVERGENCE_TEST_3_2D = {
+    'name': 'convergence_test_3_2d',
+    'description': '2-D diffusion-reaction with bulk sources and grid-aligned cell uptake (BioFVM convergence test 3 adaptation)',
+
+    'domain_size': (1000.0, 1000.0),
+    'grid_points': (int(1000.0 / 20), int(1000.0 / 20)),
+    'dt': 0.091,
+    't_final': 4.0,
+
+    'diffusion_coefficient': 1e5,
+    'decay_rate': 0.1,
+
+    'initial_condition': {
+        'type': 'uniform',
+        'value': 38.0
+    },
+
+    'boundary_condition': {
+        'type': 'neumann',
+        'flux': 0.0
+    },
+
+    'bulk': {
+        'regions': ct3_2d_boundary_regions + ct3_2d_cell_regions
+    },
+
+    'golden_solution': {
+        'type': 'numerical_reference',
+        'schema_class': ImplicitEulerBCISchema,
+        'dx_ref': 10.0,
+        'dt_ref': 0.0001
+    },
+
+    'store_history': False
+}
+
 # 4th test
 
 def generate_hcp_cells(tumor_center, tumor_radius, cell_radius):
@@ -1337,6 +1404,76 @@ CONVERGENCE_TEST_4 = {
     'store_history': False
 }
 
+def generate_hex_cells_2d(tumor_center, tumor_radius, cell_radius):
+    """Generates hexagonally packed 2D cell centers within a circle."""
+    centers = []
+    d = 2.0 * cell_radius
+    i_max = int(tumor_radius / d) + 2
+    j_max = int(tumor_radius / (d * np.sqrt(3) / 2)) + 2
+    for j in range(-j_max, j_max):
+        for i in range(-i_max, i_max):
+            x = i * d + (j % 2) * (d / 2.0)
+            y = j * d * np.sqrt(3.0) / 2.0
+            pos = np.array([x, y]) + tumor_center
+            if np.linalg.norm(pos - tumor_center) <= tumor_radius:
+                centers.append(pos)
+    return centers
+ct4_2d_tumor_center = np.array([500.0, 500.0])
+ct4_2d_tumor_radius = 400.0
+ct4_2d_cell_radius = 10.0
+ct4_2d_cell_centers = generate_hex_cells_2d(ct4_2d_tumor_center, ct4_2d_tumor_radius, ct4_2d_cell_radius)
+ct4_2d_cell_regions = [
+    {
+        'type': 'sphere',
+        'center': tuple(pos),
+        'radius': ct4_2d_cell_radius,
+        'linear_rate': -10.0,
+        'name': f'cell_{i}'
+    }
+    for i, pos in enumerate(ct4_2d_cell_centers)
+]
+ct4_2d_boundary_regions = [
+    {'type': 'rectangle', 'origin': (0.0, 0.0), 'size': (40.0, 1000.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'x_min_boundary'},
+    {'type': 'rectangle', 'origin': (960.0, 0.0), 'size': (40.0, 1000.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'x_max_boundary'},
+    {'type': 'rectangle', 'origin': (40.0, 0.0), 'size': (920.0, 40.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'y_min_boundary'},
+    {'type': 'rectangle', 'origin': (40.0, 960.0), 'size': (920.0, 40.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'y_max_boundary'}
+]
+CONVERGENCE_TEST_4_2D = {
+    'name': 'convergence_test_4_2d',
+    'description': '2-D diffusion-reaction with bulk sources, off-lattice cell uptake (BioFVM convergence test 4 adaptation)',
+
+    'domain_size': (1000.0, 1000.0),
+    'grid_points': (int(1000.0 / 20), int(1000.0 / 20)),
+    'dt': 0.01,
+    't_final': 4.0,
+
+    'diffusion_coefficient': 1e5,
+    'decay_rate': 0.1,
+
+    'initial_condition': {
+        'type': 'uniform',
+        'value': 38.0
+    },
+
+    'boundary_condition': {
+        'type': 'neumann',
+        'flux': 0.0
+    },
+
+    'bulk': {
+        'regions': ct4_2d_boundary_regions + ct4_2d_cell_regions
+    },
+
+    'golden_solution': {
+        'type': 'numerical_reference',
+        'schema_class': None,
+        'dx_ref': 10.0,
+        'dt_ref': 0.0001
+    },
+
+    'store_history': False
+}
+
 # 5th test
 
 tumor_center = np.array([500.0, 500.0, 500.0])
@@ -1400,6 +1537,79 @@ CONVERGENCE_TEST_5 = {
         'regions': boundary_regions + k1_regions + k2_regions
     },
     
+    'golden_solution': {
+        'type': 'numerical_reference',
+        'schema_class': None,
+        'dx_ref': 10.0,
+        'dt_ref': 0.0001
+    },
+
+    'store_history': False
+}
+
+ct5_2d_tumor_center = np.array([500.0, 500.0])
+ct5_2d_tumor_radius = 400.0
+ct5_2d_cell_radius = 5.0
+ct5_2d_uptake_centers = generate_hex_cells_2d(
+    ct5_2d_tumor_center,
+    ct5_2d_tumor_radius,
+    ct5_2d_cell_radius,
+)
+ct5_2d_k1_regions = [
+    {
+        'type': 'sphere',
+        'center': tuple(pos),
+        'radius': ct5_2d_cell_radius,
+        'linear_rate': -10.0,
+        'name': f'uptake_cell_{i}'
+    }
+    for i, pos in enumerate(ct5_2d_uptake_centers)
+]
+np.random.seed(8131)
+ct5_2d_source_centers = np.random.uniform(low=40.0, high=960.0, size=(200, 2))
+ct5_2d_k2_regions = [
+    {
+        'type': 'sphere',
+        'center': tuple(pos),
+        'radius': ct5_2d_cell_radius,
+        'linear_rate': 10.0,
+        'rho_target': 38.0,
+        'name': f'source_cell_{i}'
+    }
+    for i, pos in enumerate(ct5_2d_source_centers)
+]
+ct5_2d_boundary_regions = [
+    {'type': 'rectangle', 'origin': (0.0, 0.0), 'size': (40.0, 1000.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'x_min_boundary'},
+    {'type': 'rectangle', 'origin': (960.0, 0.0), 'size': (40.0, 1000.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'x_max_boundary'},
+    {'type': 'rectangle', 'origin': (40.0, 0.0), 'size': (920.0, 40.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'y_min_boundary'},
+    {'type': 'rectangle', 'origin': (40.0, 960.0), 'size': (920.0, 40.0), 'linear_rate': 38.0, 'rho_target': 38.0, 'name': 'y_max_boundary'}
+]
+CONVERGENCE_TEST_5_2D = {
+    'name': 'convergence_test_5_2d',
+    'description': '2-D diffusion-reaction with bulk sources, off-lattice cell uptake and supply (BioFVM convergence test 5 adaptation)',
+
+    'domain_size': (1000.0, 1000.0),
+    'grid_points': (int(1000.0 / 20), int(1000.0 / 20)),
+    'dt': 0.01,
+    't_final': 4.0,
+
+    'diffusion_coefficient': 1e5,
+    'decay_rate': 0.1,
+
+    'initial_condition': {
+        'type': 'uniform',
+        'value': 38.0
+    },
+
+    'boundary_condition': {
+        'type': 'neumann',
+        'flux': 0.0
+    },
+
+    'bulk': {
+        'regions': ct5_2d_boundary_regions + ct5_2d_k1_regions + ct5_2d_k2_regions
+    },
+
     'golden_solution': {
         'type': 'numerical_reference',
         'schema_class': None,
@@ -1654,13 +1864,18 @@ def get_scenario_by_name(name: str) -> Dict[str, Any]:
         'steady_state_agent_2d': STEADY_STATE_AGENT_2D,
         'exponential_decay_1d': EXPONENTIAL_DECAY_1D,
         'sine_decay_1d': SINE_DECAY_1D,
-        'cosine_diffusion_1d': COSINE_DIFFUSION_1D,
+        'convergence_test_1': CONVERGENCE_TEST_1,
         'cosine_diffusion_2d': COSINE_DIFFUSION_2D,
         'single_tumor_2d': SINGLE_TUMOR_2D,
         'multiple_tumor_2d': MULTIPLE_TUMOR_2D,
         'convergence_test_2': CONVERGENCE_TEST_2,
         'convergence_test_2_2d': CONVERGENCE_TEST_2_2D,
-        'convergence_test_3': CONVERGENCE_TEST_3
+        'convergence_test_3': CONVERGENCE_TEST_3,
+        'convergence_test_3_2d': CONVERGENCE_TEST_3_2D,
+        'convergence_test_4': CONVERGENCE_TEST_4,
+        'convergence_test_4_2d': CONVERGENCE_TEST_4_2D,
+        'convergence_test_5': CONVERGENCE_TEST_5,
+        'convergence_test_5_2d': CONVERGENCE_TEST_5_2D
     }
     
     if name not in scenarios:

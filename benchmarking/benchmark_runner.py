@@ -583,6 +583,7 @@ class BenchmarkRunner:
             """
             Local bisection in [dt_safe, dt_unsafe] to refine largest dt with error <= target.
             """
+            print(f"Starting local refinement for metric: {metric_key}")
             lo_dt = dt_values[safe_idx]
             hi_dt = dt_values[cross_idx]
             best_dt = lo_dt
