@@ -190,6 +190,12 @@ class ImplicitEulerBCOSSchema(Schema):
         if self._agents:
             self._step_agent_sources()
 
+        # Using Operator Splitting, boundary points masking is not necessary 
+        # because matrix is not mofidied by LHS contributions.
+        # We can just impose at the end the value in case of Dirichlet BC
+        if isinstance(self._boundary_conditions, DirichletBC):
+            value = self._boundary_conditions._get_value(t_next)
+            self.state[self._boundary_mask] = value
 
         self.t += self.dt
 
