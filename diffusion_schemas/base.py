@@ -37,8 +37,9 @@ class Schema(ABC):
         tuple of (Nx, Ny) for 2D, or (Nx, Ny, Nz) for 3D.
     dt : float
         Time step size.
-    diffusion_coefficient : float, optional
-        Diffusion coefficient D. Default is 1.0.
+    diffusion_coefficient : Union[float, np.ndarray, Callable], optional
+        Diffusion coefficient D. Can be a scalar, an array matching grid_points,
+        or a callable returning a scalar/array at time t. Default is 1.0.
     decay_rate : float, optional
         Decay rate λ. Default is 0.0 (no decay).
         
@@ -65,7 +66,7 @@ class Schema(ABC):
         domain_size: Union[float, Tuple[float, ...]],
         grid_points: Union[int, Tuple[int, ...]],
         dt: float,
-        diffusion_coefficient: float = 1.0,
+        diffusion_coefficient: Union[float, np.ndarray, Callable] = 1.0,
         decay_rate: float = 0.0,
     ):
         """Initialize the diffusion schema."""
@@ -93,7 +94,12 @@ class Schema(ABC):
         self.t = 0.0
         
         # Physical parameters
-        self._diffusion_coefficient = diffusion_coefficient
+        self._diffusion_coefficient = None
+        self._diffusion_cached_field = None
+        self._diffusion_is_scalar = None
+        self._diffusion_is_time_dependent = False
+        self._diffusion_dirty = True
+        self._set_diffusion_coefficient(diffusion_coefficient, initializing=True)
         self._decay_rate = decay_rate
         
         # Initialize state (will be set by initial condition)
@@ -109,22 +115,112 @@ class Schema(ABC):
         self._bulk = None
         
     @property
-    def diffusion_coefficient(self) -> float:
+    def diffusion_coefficient(self) -> Union[float, np.ndarray, Callable]:
         """Get the diffusion coefficient."""
         return self._diffusion_coefficient
     
-    def set_diffusion_coefficient(self, value: float) -> None:
+    def _normalize_diffusion_value(self, value: Union[float, np.ndarray]) -> Tuple[Union[float, np.ndarray], bool]:
+        if np.isscalar(value):
+            val = float(value)
+            if val < 0:
+                raise ValueError("Diffusion coefficient must be non-negative")
+            return val, True
+
+        arr = np.asarray(value, dtype=float)
+        if arr.shape != self.grid_points:
+            raise ValueError(
+                f"Diffusion coefficient shape {arr.shape} does not match grid shape {self.grid_points}"
+            )
+        if np.any(arr < 0):
+            raise ValueError("Diffusion coefficient must be non-negative")
+        return arr, False
+
+    def _set_diffusion_coefficient(
+        self,
+        value: Union[float, np.ndarray, Callable],
+        initializing: bool = False,
+    ) -> None:
+        self._diffusion_is_time_dependent = callable(value)
+        self._diffusion_cached_field = None
+        self._diffusion_is_scalar = None
+
+        if self._diffusion_is_time_dependent:
+            self._diffusion_coefficient = value
+        else:
+            normalized, is_scalar = self._normalize_diffusion_value(value)
+            self._diffusion_is_scalar = is_scalar
+            if is_scalar:
+                self._diffusion_coefficient = normalized
+            else:
+                self._diffusion_coefficient = normalized.copy()
+                self._diffusion_cached_field = self._diffusion_coefficient
+
+        self._diffusion_dirty = True
+
+        if not initializing:
+            return
+
+    def _evaluate_diffusion_value(self, t: Optional[float]) -> Tuple[Union[float, np.ndarray], bool]:
+        eval_t = self.t if t is None else t
+        if self._diffusion_is_time_dependent:
+            value = self._diffusion_coefficient(eval_t)
+        else:
+            value = self._diffusion_coefficient
+
+        normalized, is_scalar = self._normalize_diffusion_value(value)
+        if self._diffusion_is_scalar is None:
+            self._diffusion_is_scalar = is_scalar
+        return normalized, is_scalar
+
+    def diffusion_is_scalar(self, t: Optional[float] = None) -> bool:
+        if self._diffusion_is_scalar is None:
+            self._evaluate_diffusion_value(t)
+        return bool(self._diffusion_is_scalar)
+
+    @property
+    def diffusion_is_time_dependent(self) -> bool:
+        return self._diffusion_is_time_dependent
+
+    def _diffusion_value(self, t: Optional[float] = None) -> Union[float, np.ndarray]:
+        if not self._diffusion_is_time_dependent:
+            return self._diffusion_coefficient
+        value, _ = self._evaluate_diffusion_value(t)
+        return value
+
+    def _diffusion_field(self, t: Optional[float] = None) -> np.ndarray:
+        if not self._diffusion_is_time_dependent:
+            if self.diffusion_is_scalar(t):
+                return np.full(self.grid_points, float(self._diffusion_coefficient))
+            return self._diffusion_cached_field
+
+        value, is_scalar = self._evaluate_diffusion_value(t)
+        if is_scalar:
+            return np.full(self.grid_points, float(value))
+        return value
+
+    def _diffusion_faces(self, d_field: np.ndarray) -> List[np.ndarray]:
+        faces = []
+        for axis in range(self.ndim):
+            slicer_low = [slice(None)] * self.ndim
+            slicer_high = [slice(None)] * self.ndim
+            slicer_low[axis] = slice(0, -1)
+            slicer_high[axis] = slice(1, None)
+            d_low = d_field[tuple(slicer_low)]
+            d_high = d_field[tuple(slicer_high)]
+            faces.append(0.5 * (d_low + d_high))
+        return faces
+
+    def set_diffusion_coefficient(self, value: Union[float, np.ndarray, Callable]) -> None:
         """
         Set the diffusion coefficient.
         
         Parameters
         ----------
-        value : float
-            Diffusion coefficient D (must be non-negative).
+        value : Union[float, np.ndarray, Callable]
+            Diffusion coefficient D (must be non-negative). Can be a scalar,
+            array matching grid_points, or a callable of time.
         """
-        if value < 0:
-            raise ValueError("Diffusion coefficient must be non-negative")
-        self._diffusion_coefficient = value
+        self._set_diffusion_coefficient(value)
         
     @property
     def decay_rate(self) -> float:
