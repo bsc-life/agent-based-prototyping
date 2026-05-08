@@ -1,5 +1,6 @@
 """Unified implicit LOD schemas with variant selection."""
 
+from typing import Optional, Tuple
 import numpy as np
 from scipy.sparse import diags, eye, csr_matrix, lil_matrix
 from scipy.sparse.linalg import spsolve, splu
@@ -62,33 +63,135 @@ class _ImplicitLODUnified(Schema):
         else:
             raise ValueError(f"Unsupported number of dimensions: {self.ndim}")
 
+        self._diffusion_dirty = False
+
+    def _ensure_system_matrix_current(self) -> None:
+        if self.diffusion_is_time_dependent or self._diffusion_dirty:
+            self._build_system_matrix()
+
+    def _build_line_banded(
+        self,
+        d_line: np.ndarray,
+        h: float,
+        dt_factor: float,
+        decay_term: float,
+        source_lhs_line: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        n = d_line.shape[0]
+        d_face = 0.5 * (d_line[:-1] + d_line[1:])
+
+        d_minus = np.empty(n)
+        d_plus = np.empty(n)
+        d_minus[0] = d_face[0]
+        d_minus[1:] = d_face
+        d_plus[-1] = d_face[-1]
+        d_plus[:-1] = d_face
+
+        main = 1.0 + dt_factor * (d_minus + d_plus) / (h**2) + decay_term
+        if source_lhs_line is not None:
+            main = main + source_lhs_line
+
+        ab = np.zeros((3, n))
+        ab[0, 1:] = -(dt_factor * d_plus[:-1]) / (h**2)
+        ab[2, :-1] = -(dt_factor * d_minus[1:]) / (h**2)
+        ab[1, :] = main
+
+        return ab, d_face
+
+    def _apply_bc_to_banded(
+        self,
+        ab: np.ndarray,
+        rhs_line: np.ndarray,
+        h: float,
+        dt_factor: float,
+        t_eval: float,
+        d_face: Optional[np.ndarray] = None,
+    ) -> None:
+        if self._boundary_conditions is None:
+            return
+
+        if isinstance(self._boundary_conditions, NeumannBC):
+            flux = self._boundary_conditions._get_flux(t_eval)
+            forcing = (2 * dt_factor * flux) / h
+
+            if d_face is None:
+                d_left = float(self._diffusion_value(t_eval))
+                d_right = d_left
+            else:
+                d_left = d_face[0]
+                d_right = d_face[-1]
+
+            alpha_left = dt_factor * d_left / (h**2)
+            alpha_right = dt_factor * d_right / (h**2)
+
+            ab[0, 1] = -2 * alpha_left
+            rhs_line[0] -= forcing
+
+            ab[2, -2] = -2 * alpha_right
+            rhs_line[-1] += forcing
+
+        elif isinstance(self._boundary_conditions, DirichletBC):
+            val = self._boundary_conditions._get_value(t_eval)
+
+            ab[1, 0] = 1.0
+            ab[0, 1] = 0.0
+            rhs_line[0] = val
+
+            ab[1, -1] = 1.0
+            ab[2, -2] = 0.0
+            rhs_line[-1] = val
+
+    def _solve_line_banded(
+        self,
+        d_line: np.ndarray,
+        rhs_line: np.ndarray,
+        h: float,
+        dt_factor: float,
+        decay_term: float,
+        t_eval: float,
+        source_lhs_line: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
+        ab, d_face = self._build_line_banded(d_line, h, dt_factor, decay_term, source_lhs_line)
+        self._apply_bc_to_banded(ab, rhs_line, h, dt_factor, t_eval, d_face)
+        return solve_banded((1, 1), ab, rhs_line)
+
     def _build_matrix_1d(self) -> csr_matrix:
         n = self.grid_points[0]
         dx = self.dx[0]
+
+        if not self.diffusion_is_scalar():
+            d = float(np.mean(self._diffusion_field()))
+        else:
+            d = float(self._diffusion_value())
 
         diag_main = -2 * np.ones(n) / (dx**2)
         diag_off = np.ones(n - 1) / (dx**2)
         l = diags([diag_off, diag_main, diag_off], [-1, 0, 1], shape=(n, n), format="csr")
         i = eye(n, format="csr")
 
-        return i - self.dt * self.diffusion_coefficient * l + self.dt * self.decay_rate * i
+        return i - self.dt * d * l + self.dt * self.decay_rate * i
 
     def _build_matrix_2d(self):
         nx, ny = self.grid_points
         dx, dy = self.dx
         factor = 1 / 2
 
+        if not self.diffusion_is_scalar():
+            d = float(np.mean(self._diffusion_field()))
+        else:
+            d = float(self._diffusion_value())
+
         diag_main_x = -2 * np.ones(nx) / (dx**2)
         diag_off_x = np.ones(nx - 1) / (dx**2)
         lx = diags([diag_off_x, diag_main_x, diag_off_x], [-1, 0, 1], shape=(nx, nx), format="csr")
         ix = eye(nx, format="csr")
-        ax = ix - self.dt * self.diffusion_coefficient * lx + factor * self.dt * self.decay_rate * ix
+        ax = ix - self.dt * d * lx + factor * self.dt * self.decay_rate * ix
 
         diag_main_y = -2 * np.ones(ny) / (dy**2)
         diag_off_y = np.ones(ny - 1) / (dy**2)
         ly = diags([diag_off_y, diag_main_y, diag_off_y], [-1, 0, 1], shape=(ny, ny), format="csr")
         iy = eye(ny, format="csr")
-        ay = iy - self.dt * self.diffusion_coefficient * ly + factor * self.dt * self.decay_rate * iy
+        ay = iy - self.dt * d * ly + factor * self.dt * self.decay_rate * iy
 
         return ax, ay
 
@@ -97,6 +200,11 @@ class _ImplicitLODUnified(Schema):
         dx, dy, dz = self.dx
         factor = 1 / 3
 
+        if not self.diffusion_is_scalar():
+            d = float(np.mean(self._diffusion_field()))
+        else:
+            d = float(self._diffusion_value())
+
         lx = diags(
             [np.ones(nx - 1) / dx**2, -2 * np.ones(nx) / dx**2, np.ones(nx - 1) / dx**2],
             [-1, 0, 1],
@@ -104,7 +212,7 @@ class _ImplicitLODUnified(Schema):
             format="csr",
         )
         ix = eye(nx, format="csr")
-        ax = ix - self.dt * self.diffusion_coefficient * lx + factor * self.dt * self.decay_rate * ix
+        ax = ix - self.dt * d * lx + factor * self.dt * self.decay_rate * ix
 
         ly = diags(
             [np.ones(ny - 1) / dy**2, -2 * np.ones(ny) / dy**2, np.ones(ny - 1) / dy**2],
@@ -113,7 +221,7 @@ class _ImplicitLODUnified(Schema):
             format="csr",
         )
         iy = eye(ny, format="csr")
-        ay = iy - self.dt * self.diffusion_coefficient * ly + factor * self.dt * self.decay_rate * iy
+        ay = iy - self.dt * d * ly + factor * self.dt * self.decay_rate * iy
 
         lz = diags(
             [np.ones(nz - 1) / dz**2, -2 * np.ones(nz) / dz**2, np.ones(nz - 1) / dz**2],
@@ -122,7 +230,7 @@ class _ImplicitLODUnified(Schema):
             format="csr",
         )
         iz = eye(nz, format="csr")
-        az = iz - self.dt * self.diffusion_coefficient * lz + factor * self.dt * self.decay_rate * iz
+        az = iz - self.dt * d * lz + factor * self.dt * self.decay_rate * iz
 
         return ax, ay, az
 
@@ -157,6 +265,7 @@ class _ImplicitLODUnified(Schema):
             self._lu_z = None
 
     def step(self) -> None:
+        self._ensure_system_matrix_current()
         if self._variant == "base":
             self._step_base()
         elif self._variant == "bc":
@@ -173,6 +282,11 @@ class _ImplicitLODUnified(Schema):
     def _step_base(self) -> None:
         source = self._compute_source_term()
         rhs = self.state + self.dt * source
+
+        if not self.diffusion_is_scalar():
+            self._step_base_variable(rhs)
+            self.t += self.dt
+            return
 
         if self.ndim == 1:
             ax = self.system_matrix
@@ -206,9 +320,120 @@ class _ImplicitLODUnified(Schema):
 
         self.t += self.dt
 
+    def _step_base_variable(self, rhs: np.ndarray) -> None:
+        t_eval = self.t + self.dt
+        d_field = self._diffusion_field()
+
+        if self.ndim == 1:
+            dt_factor = self.dt
+            decay_term = self.dt * self.decay_rate
+            rhs_line = rhs.reshape(self.grid_points[0]).copy()
+            self.state = self._solve_line_banded(
+                d_field,
+                rhs_line,
+                self.dx[0],
+                dt_factor,
+                decay_term,
+                t_eval,
+            ).reshape(self.grid_points)
+
+        elif self.ndim == 2:
+            nx, ny = self.grid_points
+            dt_factor = self.dt
+            decay_term = 0.5 * self.dt * self.decay_rate
+            rhs = rhs.reshape(nx, ny)
+
+            u_star = np.zeros((nx, ny))
+            for j in range(ny):
+                rhs_j = rhs[:, j].copy()
+                u_star[:, j] = self._solve_line_banded(
+                    d_field[:, j],
+                    rhs_j,
+                    self.dx[0],
+                    dt_factor,
+                    decay_term,
+                    t_eval,
+                )
+
+            if self._boundary_conditions is not None:
+                u_star = self._apply_boundary_conditions(u_star)
+
+            u_new = np.zeros((nx, ny))
+            for i in range(nx):
+                rhs_i = u_star[i, :].copy()
+                u_new[i, :] = self._solve_line_banded(
+                    d_field[i, :],
+                    rhs_i,
+                    self.dx[1],
+                    dt_factor,
+                    decay_term,
+                    t_eval,
+                )
+            self.state = u_new
+
+        elif self.ndim == 3:
+            nx, ny, nz = self.grid_points
+            dt_factor = self.dt
+            decay_term = (self.dt * self.decay_rate) / 3.0
+            rhs = rhs.reshape(nx, ny, nz)
+
+            u_star = np.zeros((nx, ny, nz))
+            for j in range(ny):
+                for k in range(nz):
+                    rhs_jk = rhs[:, j, k].copy()
+                    u_star[:, j, k] = self._solve_line_banded(
+                        d_field[:, j, k],
+                        rhs_jk,
+                        self.dx[0],
+                        dt_factor,
+                        decay_term,
+                        t_eval,
+                    )
+
+            if self._boundary_conditions is not None:
+                u_star = self._apply_boundary_conditions(u_star)
+
+            u_star_star = np.zeros((nx, ny, nz))
+            for i in range(nx):
+                for k in range(nz):
+                    rhs_ik = u_star[i, :, k].copy()
+                    u_star_star[i, :, k] = self._solve_line_banded(
+                        d_field[i, :, k],
+                        rhs_ik,
+                        self.dx[1],
+                        dt_factor,
+                        decay_term,
+                        t_eval,
+                    )
+
+            if self._boundary_conditions is not None:
+                u_star_star = self._apply_boundary_conditions(u_star_star)
+
+            u_new = np.zeros((nx, ny, nz))
+            for i in range(nx):
+                for j in range(ny):
+                    rhs_ij = u_star_star[i, j, :].copy()
+                    u_new[i, j, :] = self._solve_line_banded(
+                        d_field[i, j, :],
+                        rhs_ij,
+                        self.dx[2],
+                        dt_factor,
+                        decay_term,
+                        t_eval,
+                    )
+            self.state = u_new
+
+        if self._boundary_conditions is not None:
+            self.state = self._apply_boundary_conditions(self.state)
+
     def _step_bc(self) -> None:
         source = self._compute_source_term()
         rhs = self.state + self.dt * source
+
+        if not self.diffusion_is_scalar():
+            self._step_base_variable(rhs)
+            self.t += self.dt
+            return
 
         if self.ndim == 1:
             ax = self.system_matrix.copy().tolil()
@@ -260,6 +485,11 @@ class _ImplicitLODUnified(Schema):
                 source_lhs[self._boundary_mask] = 0.0
 
         rhs = self.state.flatten() + self.dt * (source_explicit.flatten() + source_rhs.flatten())
+
+        if not self.diffusion_is_scalar():
+            self._step_bci_variable(rhs, source_lhs)
+            self.t += self.dt
+            return
 
         if self.ndim == 1:
             ax = self.system_matrix.copy().tolil()
@@ -328,6 +558,112 @@ class _ImplicitLODUnified(Schema):
 
         self.t += self.dt
 
+    def _step_bci_variable(self, rhs: np.ndarray, source_lhs: np.ndarray) -> None:
+        t_eval = self.t + self.dt
+        d_field = self._diffusion_field()
+
+        if self.ndim == 1:
+            dt_factor = self.dt
+            decay_term = self.dt * self.decay_rate
+            rhs_line = rhs.reshape(self.grid_points[0]).copy()
+            source_line = self.dt * source_lhs.reshape(self.grid_points[0])
+            self.state = self._solve_line_banded(
+                d_field,
+                rhs_line,
+                self.dx[0],
+                dt_factor,
+                decay_term,
+                t_eval,
+                source_line,
+            ).reshape(self.grid_points)
+
+        elif self.ndim == 2:
+            nx, ny = self.grid_points
+            dt_factor = self.dt
+            decay_term = 0.5 * self.dt * self.decay_rate
+            rhs = rhs.reshape(nx, ny)
+
+            u_star = np.zeros((nx, ny))
+            for j in range(ny):
+                rhs_j = rhs[:, j].copy()
+                source_line = (self.dt / 2.0) * source_lhs[:, j]
+                u_star[:, j] = self._solve_line_banded(
+                    d_field[:, j],
+                    rhs_j,
+                    self.dx[0],
+                    dt_factor,
+                    decay_term,
+                    t_eval,
+                    source_line,
+                )
+
+            u_new = np.zeros((nx, ny))
+            for i in range(nx):
+                rhs_i = u_star[i, :].copy()
+                source_line = (self.dt / 2.0) * source_lhs[i, :]
+                u_new[i, :] = self._solve_line_banded(
+                    d_field[i, :],
+                    rhs_i,
+                    self.dx[1],
+                    dt_factor,
+                    decay_term,
+                    t_eval,
+                    source_line,
+                )
+            self.state = u_new
+
+        elif self.ndim == 3:
+            nx, ny, nz = self.grid_points
+            dt_factor = self.dt
+            decay_term = (self.dt * self.decay_rate) / 3.0
+            rhs = rhs.reshape(nx, ny, nz)
+
+            u_star = np.zeros((nx, ny, nz))
+            for j in range(ny):
+                for k in range(nz):
+                    rhs_jk = rhs[:, j, k].copy()
+                    source_line = (self.dt / 3.0) * source_lhs[:, j, k]
+                    u_star[:, j, k] = self._solve_line_banded(
+                        d_field[:, j, k],
+                        rhs_jk,
+                        self.dx[0],
+                        dt_factor,
+                        decay_term,
+                        t_eval,
+                        source_line,
+                    )
+
+            u_star_star = np.zeros((nx, ny, nz))
+            for i in range(nx):
+                for k in range(nz):
+                    rhs_ik = u_star[i, :, k].copy()
+                    source_line = (self.dt / 3.0) * source_lhs[i, :, k]
+                    u_star_star[i, :, k] = self._solve_line_banded(
+                        d_field[i, :, k],
+                        rhs_ik,
+                        self.dx[1],
+                        dt_factor,
+                        decay_term,
+                        t_eval,
+                        source_line,
+                    )
+
+            u_new = np.zeros((nx, ny, nz))
+            for i in range(nx):
+                for j in range(ny):
+                    rhs_ij = u_star_star[i, j, :].copy()
+                    source_line = (self.dt / 3.0) * source_lhs[i, j, :]
+                    u_new[i, j, :] = self._solve_line_banded(
+                        d_field[i, j, :],
+                        rhs_ij,
+                        self.dx[2],
+                        dt_factor,
+                        decay_term,
+                        t_eval,
+                        source_line,
+                    )
+            self.state = u_new
+
     def _step_bcos(self) -> None:
         self._step_diffusion_decay()
 
@@ -347,6 +683,10 @@ class _ImplicitLODUnified(Schema):
         self.t += self.dt
 
     def _step_diffusion_decay(self) -> None:
+        if not self.diffusion_is_scalar():
+            self._step_base_variable(self.state.copy())
+            return
+
         rhs = self.state.copy()
 
         if self.ndim == 1:
@@ -391,8 +731,9 @@ class _ImplicitLODUnified(Schema):
     def _step_agent_sources(self) -> None:
         self.state += self.dt * self.agents_rhs_contribution
 
-    def step(self) -> None:
+    def _step_bci_opt(self) -> None:
         """Perform one LOD time step with integrated BCs."""
+        self._ensure_system_matrix_current()
         t_next = self.t + self.dt
         
         source_explicit = self._compute_source_term(implicit=True, t=t_next)
@@ -410,6 +751,11 @@ class _ImplicitLODUnified(Schema):
         # Right-hand side: u^n + dt*(S_explicit + S_rhs)
         rhs = self.state.flatten() + self.dt * (source_explicit.flatten() + source_rhs.flatten())
         
+        if not self.diffusion_is_scalar():
+            self._step_bci_variable(rhs, source_lhs)
+            self.t += self.dt
+            return
+
         # --------------------- 1D CASE ---------------------
         if self.ndim == 1:
             Nx = self.grid_points[0]
@@ -451,7 +797,9 @@ class _ImplicitLODUnified(Schema):
                     ab_x[1, 0] = 1.0; ab_x[0, 1] = 0.0; rhs_copy[0] = bc_val_x
                     ab_x[1, -1] = 1.0; ab_x[2, -2] = 0.0; rhs_copy[-1] = bc_val_x
 
-                u_star[:, j] = solve_banded((1, 1), ab_x, rhs_copy)
+                u_new = solve_banded((1, 1), ab_x, rhs_copy)
+
+            self.state = u_new.reshape(self.grid_points)
 
         # --------------------- 2D CASE ---------------------
         elif self.ndim == 2:

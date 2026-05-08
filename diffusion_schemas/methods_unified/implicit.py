@@ -58,10 +58,144 @@ class _ImplicitEulerUnified(Schema):
         else:
             raise ValueError(f"Unsupported number of dimensions: {self.ndim}")
 
+        self._diffusion_dirty = False
+
+    def _ensure_system_matrix_current(self) -> None:
+        if self.diffusion_is_time_dependent or self._diffusion_dirty:
+            self._build_system_matrix()
+
+    def _build_conservative_operator_1d(self, d_field: np.ndarray) -> csr_matrix:
+        n = self.grid_points[0]
+        dx = self.dx[0]
+        d_face = 0.5 * (d_field[:-1] + d_field[1:])
+
+        lower = d_face / (dx**2)
+        upper = d_face / (dx**2)
+
+        diag = np.zeros(n)
+        diag[1:-1] = -(d_face[1:] + d_face[:-1]) / (dx**2)
+        diag[0] = -2 * d_face[0] / (dx**2)
+        diag[-1] = -2 * d_face[-1] / (dx**2)
+
+        return diags([lower, diag, upper], [-1, 0, 1], shape=(n, n), format="csr")
+
+    def _build_conservative_operator_2d(self, d_field: np.ndarray) -> csr_matrix:
+        nx, ny = self.grid_points
+        dx, dy = self.dx
+        d_x, d_y = self._diffusion_faces(d_field)
+
+        rows = []
+        cols = []
+        data = []
+
+        for i in range(nx):
+            for j in range(ny):
+                idx = i * ny + j
+
+                d_x_minus = d_x[i - 1, j] if i > 0 else d_x[0, j]
+                d_x_plus = d_x[i, j] if i < nx - 1 else d_x[-1, j]
+                d_y_minus = d_y[i, j - 1] if j > 0 else d_y[i, 0]
+                d_y_plus = d_y[i, j] if j < ny - 1 else d_y[i, -1]
+
+                diag = -(
+                    (d_x_minus + d_x_plus) / (dx**2)
+                    + (d_y_minus + d_y_plus) / (dy**2)
+                )
+                rows.append(idx)
+                cols.append(idx)
+                data.append(diag)
+
+                if i > 0:
+                    rows.append(idx)
+                    cols.append(idx - ny)
+                    data.append(d_x_minus / (dx**2))
+                if i < nx - 1:
+                    rows.append(idx)
+                    cols.append(idx + ny)
+                    data.append(d_x_plus / (dx**2))
+                if j > 0:
+                    rows.append(idx)
+                    cols.append(idx - 1)
+                    data.append(d_y_minus / (dy**2))
+                if j < ny - 1:
+                    rows.append(idx)
+                    cols.append(idx + 1)
+                    data.append(d_y_plus / (dy**2))
+
+        return csr_matrix((data, (rows, cols)), shape=(nx * ny, nx * ny))
+
+    def _build_conservative_operator_3d(self, d_field: np.ndarray) -> csr_matrix:
+        nx, ny, nz = self.grid_points
+        dx, dy, dz = self.dx
+        d_x, d_y, d_z = self._diffusion_faces(d_field)
+
+        rows = []
+        cols = []
+        data = []
+
+        stride_y = nz
+        stride_x = ny * nz
+
+        for i in range(nx):
+            for j in range(ny):
+                for k in range(nz):
+                    idx = (i * ny + j) * nz + k
+
+                    d_x_minus = d_x[i - 1, j, k] if i > 0 else d_x[0, j, k]
+                    d_x_plus = d_x[i, j, k] if i < nx - 1 else d_x[-1, j, k]
+                    d_y_minus = d_y[i, j - 1, k] if j > 0 else d_y[i, 0, k]
+                    d_y_plus = d_y[i, j, k] if j < ny - 1 else d_y[i, -1, k]
+                    d_z_minus = d_z[i, j, k - 1] if k > 0 else d_z[i, j, 0]
+                    d_z_plus = d_z[i, j, k] if k < nz - 1 else d_z[i, j, -1]
+
+                    diag = -(
+                        (d_x_minus + d_x_plus) / (dx**2)
+                        + (d_y_minus + d_y_plus) / (dy**2)
+                        + (d_z_minus + d_z_plus) / (dz**2)
+                    )
+                    rows.append(idx)
+                    cols.append(idx)
+                    data.append(diag)
+
+                    if i > 0:
+                        rows.append(idx)
+                        cols.append(idx - stride_x)
+                        data.append(d_x_minus / (dx**2))
+                    if i < nx - 1:
+                        rows.append(idx)
+                        cols.append(idx + stride_x)
+                        data.append(d_x_plus / (dx**2))
+                    if j > 0:
+                        rows.append(idx)
+                        cols.append(idx - stride_y)
+                        data.append(d_y_minus / (dy**2))
+                    if j < ny - 1:
+                        rows.append(idx)
+                        cols.append(idx + stride_y)
+                        data.append(d_y_plus / (dy**2))
+                    if k > 0:
+                        rows.append(idx)
+                        cols.append(idx - 1)
+                        data.append(d_z_minus / (dz**2))
+                    if k < nz - 1:
+                        rows.append(idx)
+                        cols.append(idx + 1)
+                        data.append(d_z_plus / (dz**2))
+
+        return csr_matrix((data, (rows, cols)), shape=(nx * ny * nz, nx * ny * nz))
+
     def _build_matrix_1d(self) -> csr_matrix:
         """Build the 1D system matrix (I - dt*D*L + dt*lambda*I)."""
         n = self.grid_points[0]
         dx = self.dx[0]
+
+        if not self.diffusion_is_scalar():
+            d_field = self._diffusion_field()
+            l = self._build_conservative_operator_1d(d_field)
+            i = eye(n, format="csr")
+            return i - self.dt * l + self.dt * self.decay_rate * i
+
+        d = float(self._diffusion_value())
 
         diag_main = -2 * np.ones(n) / (dx**2)
         diag_off = np.ones(n - 1) / (dx**2)
@@ -69,12 +203,20 @@ class _ImplicitEulerUnified(Schema):
         l = diags([diag_off, diag_main, diag_off], [-1, 0, 1], shape=(n, n), format="csr")
         i = eye(n, format="csr")
 
-        return i - self.dt * self.diffusion_coefficient * l + self.dt * self.decay_rate * i
+        return i - self.dt * d * l + self.dt * self.decay_rate * i
 
     def _build_matrix_2d(self) -> csr_matrix:
         """Build the 2D system matrix using Kronecker products."""
         nx, ny = self.grid_points
         dx, dy = self.dx
+
+        if not self.diffusion_is_scalar():
+            d_field = self._diffusion_field()
+            l = self._build_conservative_operator_2d(d_field)
+            i = eye(nx * ny, format="csr")
+            return i - self.dt * l + self.dt * self.decay_rate * i
+
+        d = float(self._diffusion_value())
 
         diag_main_x = -2 * np.ones(nx) / (dx**2)
         diag_off_x = np.ones(nx - 1) / (dx**2)
@@ -90,12 +232,20 @@ class _ImplicitEulerUnified(Schema):
         l = kron(lx, iy) + kron(ix, ly)
         i = eye(nx * ny, format="csr")
 
-        return i - self.dt * self.diffusion_coefficient * l + self.dt * self.decay_rate * i
+        return i - self.dt * d * l + self.dt * self.decay_rate * i
 
     def _build_matrix_3d(self) -> csr_matrix:
         """Build the 3D system matrix using Kronecker products."""
         nx, ny, nz = self.grid_points
         dx, dy, dz = self.dx
+
+        if not self.diffusion_is_scalar():
+            d_field = self._diffusion_field()
+            l = self._build_conservative_operator_3d(d_field)
+            i = eye(nx * ny * nz, format="csr")
+            return i - self.dt * l + self.dt * self.decay_rate * i
+
+        d = float(self._diffusion_value())
 
         diag_main_x = -2 * np.ones(nx) / (dx**2)
         diag_off_x = np.ones(nx - 1) / (dx**2)
@@ -116,9 +266,10 @@ class _ImplicitEulerUnified(Schema):
         l = kron(kron(lx, iy), iz) + kron(kron(ix, ly), iz) + kron(kron(ix, iy), lz)
         i = eye(nx * ny * nz, format="csr")
 
-        return i - self.dt * self.diffusion_coefficient * l + self.dt * self.decay_rate * i
+        return i - self.dt * d * l + self.dt * self.decay_rate * i
 
     def step(self) -> None:
+        self._ensure_system_matrix_current()
         if self._variant == "base":
             self._step_base()
         elif self._variant == "bc":

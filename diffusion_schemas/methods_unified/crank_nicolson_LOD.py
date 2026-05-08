@@ -1,5 +1,6 @@
 """Unified Crank-Nicolson LOD schemas with variant selection."""
 
+from typing import Optional, Tuple
 import numpy as np
 from scipy.sparse import diags, eye
 from scipy.sparse.linalg import spsolve, splu
@@ -66,10 +67,106 @@ class _CrankNicolsonLODUnified(Schema):
             if self.ndim == 3:
                 self._lu_z = splu(self.A_impl_z.tocsc())
 
+        self._diffusion_dirty = False
+
+    def _ensure_system_matrices_current(self) -> None:
+        if self.diffusion_is_time_dependent or self._diffusion_dirty:
+            self._build_system_matrices()
+
+    def _build_line_banded(
+        self,
+        d_line: np.ndarray,
+        h: float,
+        dt_factor: float,
+        decay_term: float,
+        source_lhs_line: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        n = d_line.shape[0]
+        d_face = 0.5 * (d_line[:-1] + d_line[1:])
+
+        d_minus = np.empty(n)
+        d_plus = np.empty(n)
+        d_minus[0] = d_face[0]
+        d_minus[1:] = d_face
+        d_plus[-1] = d_face[-1]
+        d_plus[:-1] = d_face
+
+        main = 1.0 + dt_factor * (d_minus + d_plus) / (h**2) + decay_term
+        if source_lhs_line is not None:
+            main = main + source_lhs_line
+
+        ab = np.zeros((3, n))
+        ab[0, 1:] = -(dt_factor * d_plus[:-1]) / (h**2)
+        ab[2, :-1] = -(dt_factor * d_minus[1:]) / (h**2)
+        ab[1, :] = main
+
+        return ab, d_face
+
+    def _apply_bc_to_banded(
+        self,
+        ab: np.ndarray,
+        rhs_line: np.ndarray,
+        h: float,
+        dt_factor: float,
+        t_eval: float,
+        d_face: Optional[np.ndarray] = None,
+    ) -> None:
+        if self._boundary_conditions is None:
+            return
+
+        if isinstance(self._boundary_conditions, NeumannBC):
+            flux = self._boundary_conditions._get_flux(t_eval)
+            forcing = (2 * dt_factor * flux) / h
+
+            if d_face is None:
+                d_left = float(self._diffusion_value(t_eval))
+                d_right = d_left
+            else:
+                d_left = d_face[0]
+                d_right = d_face[-1]
+
+            alpha_left = dt_factor * d_left / (h**2)
+            alpha_right = dt_factor * d_right / (h**2)
+
+            ab[0, 1] = -2 * alpha_left
+            rhs_line[0] -= forcing
+
+            ab[2, -2] = -2 * alpha_right
+            rhs_line[-1] += forcing
+
+        elif isinstance(self._boundary_conditions, DirichletBC):
+            val = self._boundary_conditions._get_value(t_eval)
+            ab[1, 0] = 1.0
+            ab[0, 1] = 0.0
+            rhs_line[0] = val
+
+            ab[1, -1] = 1.0
+            ab[2, -2] = 0.0
+            rhs_line[-1] = val
+
+    def _solve_line_banded(
+        self,
+        d_line: np.ndarray,
+        rhs_line: np.ndarray,
+        h: float,
+        dt_factor: float,
+        decay_term: float,
+        t_eval: float,
+        source_lhs_line: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
+        ab, d_face = self._build_line_banded(d_line, h, dt_factor, decay_term, source_lhs_line)
+        self._apply_bc_to_banded(ab, rhs_line, h, dt_factor, t_eval, d_face)
+        return solve_banded((1, 1), ab, rhs_line)
+
 
     def _build_matrices_1d(self):
         n = self.grid_points[0]
         dx = self.dx[0]
+
+        if not self.diffusion_is_scalar():
+            d = float(np.mean(self._diffusion_field()))
+        else:
+            d = float(self._diffusion_value())
 
         diag_main = -2 * np.ones(n) / (dx**2)
         diag_off = np.ones(n - 1) / (dx**2)
@@ -77,7 +174,7 @@ class _CrankNicolsonLODUnified(Schema):
         l = diags([diag_off, diag_main, diag_off], [-1, 0, 1], shape=(n, n), format="csr")
         i = eye(n, format="csr")
 
-        a_impl = i - self.theta * self.dt * self.diffusion_coefficient * l + self.theta * self.dt * self.decay_rate * i
+        a_impl = i - self.theta * self.dt * d * l + self.theta * self.dt * self.decay_rate * i
 
         self.Lx = l
         return a_impl
@@ -86,6 +183,11 @@ class _CrankNicolsonLODUnified(Schema):
         nx, ny = self.grid_points
         dx, dy = self.dx
         factor = 1 / 2
+
+        if not self.diffusion_is_scalar():
+            d = float(np.mean(self._diffusion_field()))
+        else:
+            d = float(self._diffusion_value())
 
         diag_main_x = -2 * np.ones(nx) / (dx**2)
         diag_off_x = np.ones(nx - 1) / (dx**2)
@@ -98,8 +200,8 @@ class _CrankNicolsonLODUnified(Schema):
         ix = eye(nx, format="csr")
         iy = eye(ny, format="csr")
 
-        a_impl_x = ix - self.theta * self.dt * self.diffusion_coefficient * lx + self.theta * factor * self.dt * self.decay_rate * ix
-        a_impl_y = iy - self.theta * self.dt * self.diffusion_coefficient * ly + self.theta * factor * self.dt * self.decay_rate * iy
+        a_impl_x = ix - self.theta * self.dt * d * lx + self.theta * factor * self.dt * self.decay_rate * ix
+        a_impl_y = iy - self.theta * self.dt * d * ly + self.theta * factor * self.dt * self.decay_rate * iy
 
         self.Lx = lx
         self.Ly = ly
@@ -110,6 +212,11 @@ class _CrankNicolsonLODUnified(Schema):
         nx, ny, nz = self.grid_points
         dx, dy, dz = self.dx
         factor = 1 / 3
+
+        if not self.diffusion_is_scalar():
+            d = float(np.mean(self._diffusion_field()))
+        else:
+            d = float(self._diffusion_value())
 
         diag_main_x = -2 * np.ones(nx) / (dx**2)
         diag_off_x = np.ones(nx - 1) / (dx**2)
@@ -127,9 +234,9 @@ class _CrankNicolsonLODUnified(Schema):
         iy = eye(ny, format="csr")
         iz = eye(nz, format="csr")
 
-        a_impl_x = ix - self.theta * self.dt * self.diffusion_coefficient * lx + self.theta * factor * self.dt * self.decay_rate * ix
-        a_impl_y = iy - self.theta * self.dt * self.diffusion_coefficient * ly + self.theta * factor * self.dt * self.decay_rate * iy
-        a_impl_z = iz - self.theta * self.dt * self.diffusion_coefficient * lz + self.theta * factor * self.dt * self.decay_rate * iz
+        a_impl_x = ix - self.theta * self.dt * d * lx + self.theta * factor * self.dt * self.decay_rate * ix
+        a_impl_y = iy - self.theta * self.dt * d * ly + self.theta * factor * self.dt * self.decay_rate * iy
+        a_impl_z = iz - self.theta * self.dt * d * lz + self.theta * factor * self.dt * self.decay_rate * iz
 
         self.Lx = lx
         self.Ly = ly
@@ -138,6 +245,7 @@ class _CrankNicolsonLODUnified(Schema):
         return a_impl_x, a_impl_y, a_impl_z
 
     def step(self) -> None:
+        self._ensure_system_matrices_current()
         if self._variant == "base":
             self._step_base()
         elif self._variant == "bc":
@@ -189,10 +297,10 @@ class _CrankNicolsonLODUnified(Schema):
             if isinstance(self._boundary_conditions, DirichletBC):
                 bulk_lhs_np1[self._boundary_mask] = 0.0
 
-        laplacian_n = self._compute_laplacian(self.state)
+        diffusion_n = self._compute_diffusion_term(self.state)
 
         rhs_grid = self.state + (1 - self.theta) * self.dt * (
-            self.diffusion_coefficient * laplacian_n - self.decay_rate * self.state + source_n
+            diffusion_n - self.decay_rate * self.state + source_n
         ) + self.theta * self.dt * (bulk_rhs_np1 + agent_source_np1)
 
         if self._variant == "bci_opt":
@@ -221,9 +329,9 @@ class _CrankNicolsonLODUnified(Schema):
         self.t += self.dt
 
     def _step_diffusion_decay(self) -> None:
-        laplacian_n = self._compute_laplacian(self.state)
+        diffusion_n = self._compute_diffusion_term(self.state)
         rhs_grid = self.state + (1 - self.theta) * self.dt * (
-            self.diffusion_coefficient * laplacian_n - self.decay_rate * self.state
+            diffusion_n - self.decay_rate * self.state
         )
 
         self.state = self._step_lod_bc(rhs_grid)
@@ -236,39 +344,165 @@ class _CrankNicolsonLODUnified(Schema):
     def _step_agent_sources(self) -> None:
         self.state += self.dt * self.agents_rhs_contribution
 
+    def _compute_diffusion_term(self, u: np.ndarray) -> np.ndarray:
+        if self.diffusion_is_scalar():
+            d = float(self._diffusion_value())
+            return d * self._compute_laplacian(u)
+        d_field = self._diffusion_field()
+        return self._compute_conservative_diffusion(u, d_field)
+
+    def _compute_conservative_diffusion(self, u: np.ndarray, d_field: np.ndarray) -> np.ndarray:
+        if self.ndim == 1:
+            return self._conservative_diffusion_1d(u, d_field)
+        if self.ndim == 2:
+            return self._conservative_diffusion_2d(u, d_field)
+        if self.ndim == 3:
+            return self._conservative_diffusion_3d(u, d_field)
+        raise ValueError(f"Unsupported dimensions: {self.ndim}")
+
+    def _conservative_diffusion_1d(self, u: np.ndarray, d_field: np.ndarray) -> np.ndarray:
+        dx = self.dx[0]
+        n = self.grid_points[0]
+        d_face = 0.5 * (d_field[:-1] + d_field[1:])
+        flux_face = np.zeros(n + 1)
+        flux_face[1:-1] = d_face * (u[1:] - u[:-1]) / dx
+
+        if isinstance(self._boundary_conditions, NeumannBC):
+            flux_val = self._boundary_conditions._get_flux(self.t)
+        else:
+            flux_val = 0.0
+
+        flux_face[0] = -flux_val
+        flux_face[-1] = flux_val
+
+        div = (flux_face[1:] - flux_face[:-1]) / dx
+
+        if isinstance(self._boundary_conditions, DirichletBC):
+            div[0] = 0.0
+            div[-1] = 0.0
+
+        return div
+
+    def _conservative_diffusion_2d(self, u: np.ndarray, d_field: np.ndarray) -> np.ndarray:
+        dx, dy = self.dx
+        nx, ny = self.grid_points
+        d_x, d_y = self._diffusion_faces(d_field)
+
+        flux_x = d_x * (u[1:, :] - u[:-1, :]) / dx
+        flux_y = d_y * (u[:, 1:] - u[:, :-1]) / dy
+
+        flux_x_ext = np.zeros((nx + 1, ny))
+        flux_y_ext = np.zeros((nx, ny + 1))
+        flux_x_ext[1:-1, :] = flux_x
+        flux_y_ext[:, 1:-1] = flux_y
+
+        if isinstance(self._boundary_conditions, NeumannBC):
+            flux_val = self._boundary_conditions._get_flux(self.t)
+        else:
+            flux_val = 0.0
+
+        flux_x_ext[0, :] = -flux_val
+        flux_x_ext[-1, :] = flux_val
+        flux_y_ext[:, 0] = -flux_val
+        flux_y_ext[:, -1] = flux_val
+
+        div = (flux_x_ext[1:, :] - flux_x_ext[:-1, :]) / dx + (flux_y_ext[:, 1:] - flux_y_ext[:, :-1]) / dy
+
+        if isinstance(self._boundary_conditions, DirichletBC):
+            div[0, :] = 0.0
+            div[-1, :] = 0.0
+            div[:, 0] = 0.0
+            div[:, -1] = 0.0
+
+        return div
+
+    def _conservative_diffusion_3d(self, u: np.ndarray, d_field: np.ndarray) -> np.ndarray:
+        dx, dy, dz = self.dx
+        nx, ny, nz = self.grid_points
+        d_x, d_y, d_z = self._diffusion_faces(d_field)
+
+        flux_x = d_x * (u[1:, :, :] - u[:-1, :, :]) / dx
+        flux_y = d_y * (u[:, 1:, :] - u[:, :-1, :]) / dy
+        flux_z = d_z * (u[:, :, 1:] - u[:, :, :-1]) / dz
+
+        flux_x_ext = np.zeros((nx + 1, ny, nz))
+        flux_y_ext = np.zeros((nx, ny + 1, nz))
+        flux_z_ext = np.zeros((nx, ny, nz + 1))
+
+        flux_x_ext[1:-1, :, :] = flux_x
+        flux_y_ext[:, 1:-1, :] = flux_y
+        flux_z_ext[:, :, 1:-1] = flux_z
+
+        if isinstance(self._boundary_conditions, NeumannBC):
+            flux_val = self._boundary_conditions._get_flux(self.t)
+        else:
+            flux_val = 0.0
+
+        flux_x_ext[0, :, :] = -flux_val
+        flux_x_ext[-1, :, :] = flux_val
+        flux_y_ext[:, 0, :] = -flux_val
+        flux_y_ext[:, -1, :] = flux_val
+        flux_z_ext[:, :, 0] = -flux_val
+        flux_z_ext[:, :, -1] = flux_val
+
+        div = (
+            (flux_x_ext[1:, :, :] - flux_x_ext[:-1, :, :]) / dx
+            + (flux_y_ext[:, 1:, :] - flux_y_ext[:, :-1, :]) / dy
+            + (flux_z_ext[:, :, 1:] - flux_z_ext[:, :, :-1]) / dz
+        )
+
+        if isinstance(self._boundary_conditions, DirichletBC):
+            div[0, :, :] = 0.0
+            div[-1, :, :] = 0.0
+            div[:, 0, :] = 0.0
+            div[:, -1, :] = 0.0
+            div[:, :, 0] = 0.0
+            div[:, :, -1] = 0.0
+
+        return div
+
     def _step_explicit_base(self):
         u = self.state
 
-        if self.ndim == 1:
-            laplacian = self.Lx.dot(u)
+        if self.diffusion_is_scalar():
+            if self.ndim == 1:
+                laplacian = self.Lx.dot(u)
 
-        elif self.ndim == 2:
-            laplacian = self.Lx.dot(u) + self.Ly.dot(u.T).T
+            elif self.ndim == 2:
+                laplacian = self.Lx.dot(u) + self.Ly.dot(u.T).T
 
-        elif self.ndim == 3:
-            nx, ny, nz = self.grid_points
-            diff_x = self.Lx.dot(u.reshape(nx, -1)).reshape(nx, ny, nz)
-            diff_y = self.Ly.dot(u.transpose(1, 0, 2).reshape(ny, -1)).reshape(ny, nx, nz).transpose(1, 0, 2)
-            diff_z = self.Lz.dot(u.transpose(2, 0, 1).reshape(nz, -1)).reshape(nz, nx, ny).transpose(1, 2, 0)
-            laplacian = diff_x + diff_y + diff_z
+            elif self.ndim == 3:
+                nx, ny, nz = self.grid_points
+                diff_x = self.Lx.dot(u.reshape(nx, -1)).reshape(nx, ny, nz)
+                diff_y = self.Ly.dot(u.transpose(1, 0, 2).reshape(ny, -1)).reshape(ny, nx, nz).transpose(1, 0, 2)
+                diff_z = self.Lz.dot(u.transpose(2, 0, 1).reshape(nz, -1)).reshape(nz, nx, ny).transpose(1, 2, 0)
+                laplacian = diff_x + diff_y + diff_z
+
+            d = float(self._diffusion_value())
+            diffusion_term = d * laplacian
+        else:
+            diffusion_term = self._compute_diffusion_term(u)
 
         explicit_term = self.dt * (1 - self.theta) * (
-            self.diffusion_coefficient * laplacian - self.decay_rate * u
+            diffusion_term - self.decay_rate * u
         )
 
         return explicit_term
 
     def _step_explicit_bc(self):
         u = self.state
-        laplacian = self._compute_laplacian(u)
+        diffusion_term = self._compute_diffusion_term(u)
 
         explicit_term = self.dt * (1 - self.theta) * (
-            self.diffusion_coefficient * laplacian - self.decay_rate * u
+            diffusion_term - self.decay_rate * u
         )
 
         return explicit_term
 
     def _step_lod_base(self, rhs):
+        if not self.diffusion_is_scalar():
+            return self._step_lod_base_variable(rhs)
+
         if self.ndim == 1:
             self.state = spsolve(self.A_impl_x, rhs)
 
@@ -306,7 +540,115 @@ class _CrankNicolsonLODUnified(Schema):
 
         return self.state
 
+    def _step_lod_base_variable(self, rhs):
+        t_eval = self.t + self.dt
+        d_field = self._diffusion_field()
+
+        if self.ndim == 1:
+            dt_factor = self.theta * self.dt
+            decay_term = self.theta * self.dt * self.decay_rate
+            rhs_line = rhs.reshape(self.grid_points[0]).copy()
+            self.state = self._solve_line_banded(
+                d_field,
+                rhs_line,
+                self.dx[0],
+                dt_factor,
+                decay_term,
+                t_eval,
+            ).reshape(self.grid_points)
+
+        elif self.ndim == 2:
+            nx, ny = self.grid_points
+            dt_factor = self.theta * self.dt
+            decay_term = self.theta * 0.5 * self.dt * self.decay_rate
+            rhs = rhs.reshape(nx, ny)
+
+            u_star = np.zeros((nx, ny))
+            for j in range(ny):
+                rhs_j = rhs[:, j].copy()
+                u_star[:, j] = self._solve_line_banded(
+                    d_field[:, j],
+                    rhs_j,
+                    self.dx[0],
+                    dt_factor,
+                    decay_term,
+                    t_eval,
+                )
+
+            if self._boundary_conditions is not None:
+                u_star = self._apply_boundary_conditions(u_star)
+
+            u_new = np.zeros((nx, ny))
+            for i in range(nx):
+                rhs_i = u_star[i, :].copy()
+                u_new[i, :] = self._solve_line_banded(
+                    d_field[i, :],
+                    rhs_i,
+                    self.dx[1],
+                    dt_factor,
+                    decay_term,
+                    t_eval,
+                )
+            self.state = u_new
+
+        elif self.ndim == 3:
+            nx, ny, nz = self.grid_points
+            dt_factor = self.theta * self.dt
+            decay_term = self.theta * self.dt * self.decay_rate / 3.0
+            rhs = rhs.reshape(nx, ny, nz)
+
+            u_star = np.zeros((nx, ny, nz))
+            for j in range(ny):
+                for k in range(nz):
+                    rhs_jk = rhs[:, j, k].copy()
+                    u_star[:, j, k] = self._solve_line_banded(
+                        d_field[:, j, k],
+                        rhs_jk,
+                        self.dx[0],
+                        dt_factor,
+                        decay_term,
+                        t_eval,
+                    )
+
+            if self._boundary_conditions is not None:
+                u_star = self._apply_boundary_conditions(u_star)
+
+            u_star_star = np.zeros((nx, ny, nz))
+            for i in range(nx):
+                for k in range(nz):
+                    rhs_ik = u_star[i, :, k].copy()
+                    u_star_star[i, :, k] = self._solve_line_banded(
+                        d_field[i, :, k],
+                        rhs_ik,
+                        self.dx[1],
+                        dt_factor,
+                        decay_term,
+                        t_eval,
+                    )
+
+            if self._boundary_conditions is not None:
+                u_star_star = self._apply_boundary_conditions(u_star_star)
+
+            u_new = np.zeros((nx, ny, nz))
+            for i in range(nx):
+                for j in range(ny):
+                    rhs_ij = u_star_star[i, j, :].copy()
+                    u_new[i, j, :] = self._solve_line_banded(
+                        d_field[i, j, :],
+                        rhs_ij,
+                        self.dx[2],
+                        dt_factor,
+                        decay_term,
+                        t_eval,
+                    )
+            self.state = u_new
+
+        return self.state
+
     def _step_lod_bc(self, rhs):
+        if not self.diffusion_is_scalar():
+            return self._step_lod_base_variable(rhs)
+
         if self.ndim == 1:
             ax = self.A_impl_x.copy().tolil()
             rhs_x = rhs.reshape(self.grid_points[0], 1)
@@ -353,6 +695,9 @@ class _CrankNicolsonLODUnified(Schema):
         return self.state
 
     def _step_lod_bci(self, rhs, bulk_lhs_np1):
+        if not self.diffusion_is_scalar():
+            return self._step_lod_bci_variable(rhs, bulk_lhs_np1)
+
         if self.ndim == 1:
             ax = self.A_impl_x.copy().tolil()
             nx = self.grid_points[0]
@@ -431,7 +776,118 @@ class _CrankNicolsonLODUnified(Schema):
 
         return self.state
 
+    def _step_lod_bci_variable(self, rhs, bulk_lhs_np1):
+        t_eval = self.t + self.dt
+        d_field = self._diffusion_field()
+
+        if self.ndim == 1:
+            dt_factor = self.theta * self.dt
+            decay_term = self.theta * self.dt * self.decay_rate
+            rhs_line = rhs.reshape(self.grid_points[0]).copy()
+            source_line = (self.theta * self.dt) * bulk_lhs_np1.reshape(self.grid_points[0])
+            self.state = self._solve_line_banded(
+                d_field,
+                rhs_line,
+                self.dx[0],
+                dt_factor,
+                decay_term,
+                t_eval,
+                source_line,
+            ).reshape(self.grid_points)
+
+        elif self.ndim == 2:
+            nx, ny = self.grid_points
+            dt_factor = self.theta * self.dt
+            decay_term = self.theta * 0.5 * self.dt * self.decay_rate
+            rhs = rhs.reshape(nx, ny)
+
+            u_star = np.zeros((nx, ny))
+            for j in range(ny):
+                rhs_j = rhs[:, j].copy()
+                source_line = (self.theta * self.dt / 2.0) * bulk_lhs_np1[:, j]
+                u_star[:, j] = self._solve_line_banded(
+                    d_field[:, j],
+                    rhs_j,
+                    self.dx[0],
+                    dt_factor,
+                    decay_term,
+                    t_eval,
+                    source_line,
+                )
+
+            u_new = np.zeros((nx, ny))
+            for i in range(nx):
+                rhs_i = u_star[i, :].copy()
+                source_line = (self.theta * self.dt / 2.0) * bulk_lhs_np1[i, :]
+                u_new[i, :] = self._solve_line_banded(
+                    d_field[i, :],
+                    rhs_i,
+                    self.dx[1],
+                    dt_factor,
+                    decay_term,
+                    t_eval,
+                    source_line,
+                )
+            self.state = u_new
+
+        elif self.ndim == 3:
+            nx, ny, nz = self.grid_points
+            dt_factor = self.theta * self.dt
+            decay_term = self.theta * self.dt * self.decay_rate / 3.0
+            rhs = rhs.reshape(nx, ny, nz)
+
+            u_star = np.zeros((nx, ny, nz))
+            for j in range(ny):
+                for k in range(nz):
+                    rhs_jk = rhs[:, j, k].copy()
+                    source_line = (self.theta * self.dt / 3.0) * bulk_lhs_np1[:, j, k]
+                    u_star[:, j, k] = self._solve_line_banded(
+                        d_field[:, j, k],
+                        rhs_jk,
+                        self.dx[0],
+                        dt_factor,
+                        decay_term,
+                        t_eval,
+                        source_line,
+                    )
+
+            u_star_star = np.zeros((nx, ny, nz))
+            for i in range(nx):
+                for k in range(nz):
+                    rhs_ik = u_star[i, :, k].copy()
+                    source_line = (self.theta * self.dt / 3.0) * bulk_lhs_np1[i, :, k]
+                    u_star_star[i, :, k] = self._solve_line_banded(
+                        d_field[i, :, k],
+                        rhs_ik,
+                        self.dx[1],
+                        dt_factor,
+                        decay_term,
+                        t_eval,
+                        source_line,
+                    )
+
+            u_new = np.zeros((nx, ny, nz))
+            for i in range(nx):
+                for j in range(ny):
+                    rhs_ij = u_star_star[i, j, :].copy()
+                    source_line = (self.theta * self.dt / 3.0) * bulk_lhs_np1[i, j, :]
+                    u_new[i, j, :] = self._solve_line_banded(
+                        d_field[i, j, :],
+                        rhs_ij,
+                        self.dx[2],
+                        dt_factor,
+                        decay_term,
+                        t_eval,
+                        source_line,
+                    )
+            self.state = u_new
+
+        return self.state
+
     def _step_lod_bci_opt(self, rhs, bulk_lhs_np1):
+        if not self.diffusion_is_scalar():
+            return self._step_lod_bci(rhs, bulk_lhs_np1)
+
         has_per_node_source = np.any(bulk_lhs_np1)
         has_dirichlet = isinstance(self._boundary_conditions, DirichletBC)
         is_neumann = isinstance(self._boundary_conditions, NeumannBC)

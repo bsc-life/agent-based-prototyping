@@ -1,5 +1,7 @@
 """Unified ADI schemas with variant selection."""
 
+from typing import Optional, Tuple
+
 import numpy as np
 from scipy.sparse import diags, eye
 from scipy.sparse.linalg import spsolve
@@ -46,27 +48,39 @@ class _ADIUnified(Schema):
         return mask
 
     def _build_system_matrix(self) -> None:
+        if self.diffusion_is_scalar():
+            d = float(self._diffusion_value())
+        else:
+            d = float(np.mean(self._diffusion_field()))
+
         if self._variant == "base":
             if self.ndim == 1:
-                self.system_matrix = self._build_matrix_1d_base()
+                self.system_matrix = self._build_matrix_1d_base(d)
             elif self.ndim == 2:
-                self.system_matrix = self._build_matrix_2d_base()
+                self.system_matrix = self._build_matrix_2d_base(d)
             elif self.ndim == 3:
-                self.system_matrix = self._build_matrix_3d_base()
+                self.system_matrix = self._build_matrix_3d_base(d)
             else:
                 raise ValueError(f"Unsupported number of dimensions: {self.ndim}")
+            self._diffusion_dirty = False
             return
 
         if self.ndim == 1:
-            self.system_matrix = self._build_matrix_1d_bc()
+            self.system_matrix = self._build_matrix_1d_bc(d)
         elif self.ndim == 2:
-            self.system_matrix = self._build_matrix_2d_bc()
+            self.system_matrix = self._build_matrix_2d_bc(d)
         elif self.ndim == 3:
-            self.system_matrix = self._build_matrix_3d_bc()
+            self.system_matrix = self._build_matrix_3d_bc(d)
         else:
             raise ValueError(f"Unsupported number of dimensions: {self.ndim}")
 
-    def _build_matrix_1d_base(self):
+        self._diffusion_dirty = False
+
+    def _ensure_system_matrix_current(self) -> None:
+        if self.diffusion_is_time_dependent or self._diffusion_dirty:
+            self._build_system_matrix()
+
+    def _build_matrix_1d_base(self, d):
         n = self.grid_points[0]
         dx = self.dx[0]
 
@@ -75,9 +89,9 @@ class _ADIUnified(Schema):
         l = diags([diag_off, diag_main, diag_off], [-1, 0, 1], shape=(n, n), format="csr")
         i = eye(n, format="csr")
 
-        return i - self.dt * self.diffusion_coefficient * l + self.dt * self.decay_rate * i
+        return i - self.dt * d * l + self.dt * self.decay_rate * i
 
-    def _build_matrix_2d_base(self):
+    def _build_matrix_2d_base(self, d):
         nx, ny = self.grid_points
         dx, dy = self.dx
 
@@ -89,20 +103,20 @@ class _ADIUnified(Schema):
         lx = diags([diag_off_x, diag_main_x, diag_off_x], [-1, 0, 1], shape=(nx, nx), format="csr")
         ix = eye(nx, format="csr")
 
-        lhs_x = ix - dt_half * self.diffusion_coefficient * lx + decay_term * ix
-        rhs_x = ix + dt_half * self.diffusion_coefficient * lx - decay_term * ix
+        lhs_x = ix - dt_half * d * lx + decay_term * ix
+        rhs_x = ix + dt_half * d * lx - decay_term * ix
 
         diag_main_y = -2 * np.ones(ny) / (dy**2)
         diag_off_y = np.ones(ny - 1) / (dy**2)
         ly = diags([diag_off_y, diag_main_y, diag_off_y], [-1, 0, 1], shape=(ny, ny), format="csr")
         iy = eye(ny, format="csr")
 
-        lhs_y = iy - dt_half * self.diffusion_coefficient * ly + decay_term * iy
-        rhs_y = iy + dt_half * self.diffusion_coefficient * ly - decay_term * iy
+        lhs_y = iy - dt_half * d * ly + decay_term * iy
+        rhs_y = iy + dt_half * d * ly - decay_term * iy
 
         return lhs_x, rhs_x, lhs_y, rhs_y
 
-    def _build_matrix_3d_base(self):
+    def _build_matrix_3d_base(self, d):
         nx, ny, nz = self.grid_points
         dx, dy, dz = self.dx
 
@@ -110,22 +124,22 @@ class _ADIUnified(Schema):
 
         lx = diags([np.ones(nx - 1) / dx**2, -2 * np.ones(nx) / dx**2, np.ones(nx - 1) / dx**2], [-1, 0, 1], shape=(nx, nx), format="csr")
         ix = eye(nx, format="csr")
-        lhs_x = ix - self.dt * self.diffusion_coefficient * lx + decay_term * ix
-        a_x = self.dt * self.diffusion_coefficient * lx - decay_term * ix
+        lhs_x = ix - self.dt * d * lx + decay_term * ix
+        a_x = self.dt * d * lx - decay_term * ix
 
         ly = diags([np.ones(ny - 1) / dy**2, -2 * np.ones(ny) / dy**2, np.ones(ny - 1) / dy**2], [-1, 0, 1], shape=(ny, ny), format="csr")
         iy = eye(ny, format="csr")
-        lhs_y = iy - self.dt * self.diffusion_coefficient * ly + decay_term * iy
-        a_y = self.dt * self.diffusion_coefficient * ly - decay_term * iy
+        lhs_y = iy - self.dt * d * ly + decay_term * iy
+        a_y = self.dt * d * ly - decay_term * iy
 
         lz = diags([np.ones(nz - 1) / dz**2, -2 * np.ones(nz) / dz**2, np.ones(nz - 1) / dz**2], [-1, 0, 1], shape=(nz, nz), format="csr")
         iz = eye(nz, format="csr")
-        lhs_z = iz - self.dt * self.diffusion_coefficient * lz + decay_term * iz
-        a_z = self.dt * self.diffusion_coefficient * lz - decay_term * iz
+        lhs_z = iz - self.dt * d * lz + decay_term * iz
+        a_z = self.dt * d * lz - decay_term * iz
 
         return lhs_x, a_x, lhs_y, a_y, lhs_z, a_z
 
-    def _build_matrix_1d_bc(self):
+    def _build_matrix_1d_bc(self, d):
         n = self.grid_points[0]
         dx = self.dx[0]
 
@@ -134,9 +148,9 @@ class _ADIUnified(Schema):
         l = diags([diag_off, diag_main, diag_off], [-1, 0, 1], shape=(n, n), format="csr")
         i = eye(n, format="csr")
 
-        return i - self.dt * self.diffusion_coefficient * l + self.dt * self.decay_rate * i
+        return i - self.dt * d * l + self.dt * self.decay_rate * i
 
-    def _build_matrix_2d_bc(self):
+    def _build_matrix_2d_bc(self, d):
         nx, ny = self.grid_points
         dx, dy = self.dx
 
@@ -153,8 +167,8 @@ class _ADIUnified(Schema):
             lx[-1, -1], lx[-1, -2] = -2 / (dx**2), 2 / (dx**2)
 
         lx, ix = lx.tocsr(), ix.tocsr()
-        lhs_x = (ix - dt_half * self.diffusion_coefficient * lx + decay_term * ix).tolil()
-        rhs_x = (ix + dt_half * self.diffusion_coefficient * lx - decay_term * ix).tolil()
+        lhs_x = (ix - dt_half * d * lx + decay_term * ix).tolil()
+        rhs_x = (ix + dt_half * d * lx - decay_term * ix).tolil()
 
         if isinstance(self._boundary_conditions, DirichletBC):
             for row in [0, -1]:
@@ -173,8 +187,8 @@ class _ADIUnified(Schema):
             ly[-1, -1], ly[-1, -2] = -2 / (dy**2), 2 / (dy**2)
 
         ly, iy = ly.tocsr(), iy.tocsr()
-        lhs_y = (iy - dt_half * self.diffusion_coefficient * ly + decay_term * iy).tolil()
-        rhs_y = (iy + dt_half * self.diffusion_coefficient * ly - decay_term * iy).tolil()
+        lhs_y = (iy - dt_half * d * ly + decay_term * iy).tolil()
+        rhs_y = (iy + dt_half * d * ly - decay_term * iy).tolil()
 
         if isinstance(self._boundary_conditions, DirichletBC):
             for row in [0, -1]:
@@ -185,7 +199,7 @@ class _ADIUnified(Schema):
 
         return lhs_x, rhs_x, lhs_y, rhs_y
 
-    def _build_matrix_3d_bc(self):
+    def _build_matrix_3d_bc(self, d):
         nx, ny, nz = self.grid_points
         dx, dy, dz = self.dx
 
@@ -197,8 +211,8 @@ class _ADIUnified(Schema):
             lx[0, 0], lx[0, 1] = -2 / (dx**2), 2 / (dx**2)
             lx[-1, -1], lx[-1, -2] = -2 / (dx**2), 2 / (dx**2)
         lx, ix = lx.tocsr(), ix.tocsr()
-        lhs_x = (ix - self.dt * self.diffusion_coefficient * lx + decay_term * ix).tolil()
-        a_x = (self.dt * self.diffusion_coefficient * lx - decay_term * ix).tolil()
+        lhs_x = (ix - self.dt * d * lx + decay_term * ix).tolil()
+        a_x = (self.dt * d * lx - decay_term * ix).tolil()
 
         ly = diags([np.ones(ny - 1) / dy**2, -2 * np.ones(ny) / dy**2, np.ones(ny - 1) / dy**2], [-1, 0, 1], shape=(ny, ny), format="csr").tolil()
         iy = eye(ny, format="csr")
@@ -206,8 +220,8 @@ class _ADIUnified(Schema):
             ly[0, 0], ly[0, 1] = -2 / (dy**2), 2 / (dy**2)
             ly[-1, -1], ly[-1, -2] = -2 / (dy**2), 2 / (dy**2)
         ly, iy = ly.tocsr(), iy.tocsr()
-        lhs_y = (iy - self.dt * self.diffusion_coefficient * ly + decay_term * iy).tolil()
-        a_y = (self.dt * self.diffusion_coefficient * ly - decay_term * iy).tolil()
+        lhs_y = (iy - self.dt * d * ly + decay_term * iy).tolil()
+        a_y = (self.dt * d * ly - decay_term * iy).tolil()
 
         lz = diags([np.ones(nz - 1) / dz**2, -2 * np.ones(nz) / dz**2, np.ones(nz - 1) / dz**2], [-1, 0, 1], shape=(nz, nz), format="csr").tolil()
         iz = eye(nz, format="csr")
@@ -215,8 +229,8 @@ class _ADIUnified(Schema):
             lz[0, 0], lz[0, 1] = -2 / (dz**2), 2 / (dz**2)
             lz[-1, -1], lz[-1, -2] = -2 / (dz**2), 2 / (dz**2)
         lz, iz = lz.tocsr(), iz.tocsr()
-        lhs_z = (iz - self.dt * self.diffusion_coefficient * lz + decay_term * iz).tolil()
-        a_z = (self.dt * self.diffusion_coefficient * lz - decay_term * iz).tolil()
+        lhs_z = (iz - self.dt * d * lz + decay_term * iz).tolil()
+        a_z = (self.dt * d * lz - decay_term * iz).tolil()
 
         if isinstance(self._boundary_conditions, DirichletBC):
             for op_lhs, op_a in [(lhs_x, a_x), (lhs_y, a_y), (lhs_z, a_z)]:
@@ -228,7 +242,92 @@ class _ADIUnified(Schema):
 
         return lhs_x, a_x, lhs_y, a_y, lhs_z, a_z
 
+    def _apply_bc_to_banded(
+        self,
+        ab: np.ndarray,
+        rhs_line: np.ndarray,
+        h: float,
+        dt_factor: float,
+        t_eval: float,
+        d_face: Optional[np.ndarray] = None,
+    ) -> None:
+        if self._boundary_conditions is None:
+            return
+
+        if isinstance(self._boundary_conditions, NeumannBC):
+            flux = self._boundary_conditions._get_flux(t_eval)
+            if d_face is None:
+                d_left = float(self._diffusion_value(t_eval))
+                d_right = d_left
+            else:
+                d_left = d_face[0]
+                d_right = d_face[-1]
+
+            alpha_left = dt_factor * d_left / (h**2)
+            alpha_right = dt_factor * d_right / (h**2)
+            forcing_left = (2 * dt_factor * d_left * flux) / h
+            forcing_right = (2 * dt_factor * d_right * flux) / h
+
+            ab[0, 1] = -2 * alpha_left
+            rhs_line[0] -= forcing_left
+
+            ab[2, -2] = -2 * alpha_right
+            rhs_line[-1] += forcing_right
+
+        elif isinstance(self._boundary_conditions, DirichletBC):
+            val = self._boundary_conditions._get_value(t_eval)
+            ab[1, 0] = 1.0
+            ab[0, 1] = 0.0
+            rhs_line[0] = val
+            ab[1, -1] = 1.0
+            ab[2, -2] = 0.0
+            rhs_line[-1] = val
+
+    def _build_line_banded(
+        self,
+        d_line: np.ndarray,
+        h: float,
+        dt_factor: float,
+        decay_term: float,
+        source_lhs_line: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        n = d_line.shape[0]
+        d_face = 0.5 * (d_line[:-1] + d_line[1:])
+
+        d_minus = np.empty(n)
+        d_plus = np.empty(n)
+        d_minus[0] = d_face[0]
+        d_minus[1:] = d_face
+        d_plus[-1] = d_face[-1]
+        d_plus[:-1] = d_face
+
+        main = 1.0 + dt_factor * (d_minus + d_plus) / (h**2) + decay_term
+        if source_lhs_line is not None:
+            main = main + source_lhs_line
+
+        ab = np.zeros((3, n))
+        ab[0, 1:] = -(dt_factor * d_plus[:-1]) / (h**2)
+        ab[2, :-1] = -(dt_factor * d_minus[1:]) / (h**2)
+        ab[1, :] = main
+
+        return ab, d_face
+
+    def _solve_line_banded(
+        self,
+        d_line: np.ndarray,
+        rhs_line: np.ndarray,
+        h: float,
+        dt_factor: float,
+        decay_term: float,
+        t_eval: float,
+        source_lhs_line: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
+        ab, d_face = self._build_line_banded(d_line, h, dt_factor, decay_term, source_lhs_line)
+        self._apply_bc_to_banded(ab, rhs_line, h, dt_factor, t_eval, d_face)
+        return solve_banded((1, 1), ab, rhs_line)
+
     def step(self) -> None:
+        self._ensure_system_matrix_current()
         if self._variant == "base":
             return self._step_base()
         if self._variant == "bc":
@@ -242,6 +341,11 @@ class _ADIUnified(Schema):
         raise ValueError(f"Unsupported ADI variant: {self._variant}")
 
     def _step_base(self) -> None:
+        if not self.diffusion_is_scalar():
+            source = self._compute_source_term()
+            if source is None:
+                source = np.zeros_like(self.state)
+            return self._step_base_variable(source)
 
         source = self._compute_source_term()
 
@@ -312,6 +416,12 @@ class _ADIUnified(Schema):
     def _step_bc(self) -> None:
         if self.ndim not in (1, 2, 3):
             raise NotImplementedError(f"{self.ndim}D ADI is not implemented yet")
+
+        if not self.diffusion_is_scalar():
+            source = self._compute_source_term()
+            if source is None:
+                source = np.zeros_like(self.state)
+            return self._step_base_variable(source)
 
         source = self._compute_source_term()
 
@@ -462,6 +572,15 @@ class _ADIUnified(Schema):
     def _step_bci(self) -> None:
         if self.ndim not in (1, 2, 3):
             raise NotImplementedError(f"{self.ndim}D ADI is not implemented yet")
+
+        if not self.diffusion_is_scalar():
+            t_eval = self.t + self.dt
+            source_explicit = self._compute_source_term(implicit=True, t=t_eval)
+            source_rhs = np.zeros_like(self.state)
+            if self._bulk is not None:
+                source_rhs = self._bulk.rhs_contribution
+            source = source_rhs + source_explicit if source_explicit is not None else source_rhs
+            return self._step_base_variable(source)
 
         if self.ndim == 1:
             t_next = self.t + self.dt
@@ -663,6 +782,12 @@ class _ADIUnified(Schema):
         self.t += self.dt
 
     def _step_bcos(self) -> None:
+        if not self.diffusion_is_scalar():
+            source = self._compute_source_term(implicit=True, t=self.t + self.dt)
+            if source is None:
+                source = np.zeros_like(self.state)
+            return self._step_base_variable(source)
+
         self._step_diffusion_decay()
 
         t_next = self.t + self.dt
@@ -681,6 +806,10 @@ class _ADIUnified(Schema):
         self.t += self.dt
     
     def _step_diffusion_decay(self) -> None:
+        if not self.diffusion_is_scalar():
+            source = np.zeros_like(self.state)
+            return self._step_base_variable(source)
+
         rhs = self.state.copy()
 
         if self.ndim == 1:
@@ -814,9 +943,241 @@ class _ADIUnified(Schema):
     def _step_agent_sources(self) -> None:
         self.state += self.dt * self.agents_rhs_contribution
 
+    def _compute_diffusion_term(self, u: np.ndarray) -> np.ndarray:
+        if self.diffusion_is_scalar():
+            d = float(self._diffusion_value())
+            return d * self._compute_laplacian(u)
+        return self._axis_diffusion(u, 0) + self._axis_diffusion(u, 1) + self._axis_diffusion(u, 2)
+
+    def _axis_diffusion(self, u: np.ndarray, axis: int) -> np.ndarray:
+        d_field = self._diffusion_field()
+
+        if self.ndim == 1:
+            return self._axis_diffusion_1d(u, d_field)
+        if self.ndim == 2:
+            return self._axis_diffusion_2d(u, d_field, axis)
+        if self.ndim == 3:
+            return self._axis_diffusion_3d(u, d_field, axis)
+        raise ValueError(f"Unsupported dimensions: {self.ndim}")
+
+    def _axis_diffusion_1d(self, u: np.ndarray, d_field: np.ndarray) -> np.ndarray:
+        dx = self.dx[0]
+        n = self.grid_points[0]
+        d_face = 0.5 * (d_field[:-1] + d_field[1:])
+        flux_face = np.zeros(n + 1)
+        flux_face[1:-1] = d_face * (u[1:] - u[:-1]) / dx
+
+        if isinstance(self._boundary_conditions, NeumannBC):
+            flux_val = self._boundary_conditions._get_flux(self.t)
+            flux_face[0] = -flux_val
+            flux_face[-1] = flux_val
+
+        div = (flux_face[1:] - flux_face[:-1]) / dx
+        if isinstance(self._boundary_conditions, DirichletBC):
+            div[0] = 0.0
+            div[-1] = 0.0
+        return div
+
+    def _axis_diffusion_2d(self, u: np.ndarray, d_field: np.ndarray, axis: int) -> np.ndarray:
+        dx, dy = self.dx
+        nx, ny = self.grid_points
+        d_x, d_y = self._diffusion_faces(d_field)
+
+        if axis == 0:
+            flux = d_x * (u[1:, :] - u[:-1, :]) / dx
+            flux_ext = np.zeros((nx + 1, ny))
+            flux_ext[1:-1, :] = flux
+            if isinstance(self._boundary_conditions, NeumannBC):
+                flux_val = self._boundary_conditions._get_flux(self.t)
+                flux_ext[0, :] = -flux_val
+                flux_ext[-1, :] = flux_val
+            div = (flux_ext[1:, :] - flux_ext[:-1, :]) / dx
+            if isinstance(self._boundary_conditions, DirichletBC):
+                div[0, :] = 0.0
+                div[-1, :] = 0.0
+            return div
+
+        flux = d_y * (u[:, 1:] - u[:, :-1]) / dy
+        flux_ext = np.zeros((nx, ny + 1))
+        flux_ext[:, 1:-1] = flux
+        if isinstance(self._boundary_conditions, NeumannBC):
+            flux_val = self._boundary_conditions._get_flux(self.t)
+            flux_ext[:, 0] = -flux_val
+            flux_ext[:, -1] = flux_val
+        div = (flux_ext[:, 1:] - flux_ext[:, :-1]) / dy
+        if isinstance(self._boundary_conditions, DirichletBC):
+            div[:, 0] = 0.0
+            div[:, -1] = 0.0
+        return div
+
+    def _axis_diffusion_3d(self, u: np.ndarray, d_field: np.ndarray, axis: int) -> np.ndarray:
+        dx, dy, dz = self.dx
+        nx, ny, nz = self.grid_points
+        d_x, d_y, d_z = self._diffusion_faces(d_field)
+
+        if axis == 0:
+            flux = d_x * (u[1:, :, :] - u[:-1, :, :]) / dx
+            flux_ext = np.zeros((nx + 1, ny, nz))
+            flux_ext[1:-1, :, :] = flux
+            if isinstance(self._boundary_conditions, NeumannBC):
+                flux_val = self._boundary_conditions._get_flux(self.t)
+                flux_ext[0, :, :] = -flux_val
+                flux_ext[-1, :, :] = flux_val
+            div = (flux_ext[1:, :, :] - flux_ext[:-1, :, :]) / dx
+            if isinstance(self._boundary_conditions, DirichletBC):
+                div[0, :, :] = 0.0
+                div[-1, :, :] = 0.0
+            return div
+
+        if axis == 1:
+            flux = d_y * (u[:, 1:, :] - u[:, :-1, :]) / dy
+            flux_ext = np.zeros((nx, ny + 1, nz))
+            flux_ext[:, 1:-1, :] = flux
+            if isinstance(self._boundary_conditions, NeumannBC):
+                flux_val = self._boundary_conditions._get_flux(self.t)
+                flux_ext[:, 0, :] = -flux_val
+                flux_ext[:, -1, :] = flux_val
+            div = (flux_ext[:, 1:, :] - flux_ext[:, :-1, :]) / dy
+            if isinstance(self._boundary_conditions, DirichletBC):
+                div[:, 0, :] = 0.0
+                div[:, -1, :] = 0.0
+            return div
+
+        flux = d_z * (u[:, :, 1:] - u[:, :, :-1]) / dz
+        flux_ext = np.zeros((nx, ny, nz + 1))
+        flux_ext[:, :, 1:-1] = flux
+        if isinstance(self._boundary_conditions, NeumannBC):
+            flux_val = self._boundary_conditions._get_flux(self.t)
+            flux_ext[:, :, 0] = -flux_val
+            flux_ext[:, :, -1] = flux_val
+        div = (flux_ext[:, :, 1:] - flux_ext[:, :, :-1]) / dz
+        if isinstance(self._boundary_conditions, DirichletBC):
+            div[:, :, 0] = 0.0
+            div[:, :, -1] = 0.0
+        return div
+
+    def _step_base_variable(self, source: np.ndarray) -> None:
+        d_field = self._diffusion_field()
+        t_next = self.t + self.dt
+
+        if self.ndim == 1:
+            rhs = self.state + self.dt * source
+            rhs_line = rhs.reshape(self.grid_points[0]).copy()
+            self.state = self._solve_line_banded(
+                d_field,
+                rhs_line,
+                self.dx[0],
+                self.dt,
+                self.dt * self.decay_rate,
+                t_next,
+            ).reshape(self.grid_points)
+
+        elif self.ndim == 2:
+            dt_half = self.dt / 2.0
+            decay_term = (self.decay_rate / 2.0) * dt_half
+            half_source = dt_half * source
+            rhs_1 = self.state + self._axis_diffusion(self.state, 1) * dt_half - decay_term * self.state + half_source
+
+            nx, ny = self.grid_points
+            u_star = np.zeros((nx, ny))
+            for j in range(ny):
+                rhs_j = rhs_1[:, j].copy()
+                u_star[:, j] = self._solve_line_banded(
+                    d_field[:, j],
+                    rhs_j,
+                    self.dx[0],
+                    dt_half,
+                    decay_term,
+                    t_next,
+                )
+
+            if self._boundary_conditions is not None:
+                u_star = self._apply_boundary_conditions(u_star)
+
+            rhs_2 = u_star + self._axis_diffusion(u_star, 0) * dt_half - decay_term * u_star + half_source
+            u_new = np.zeros((nx, ny))
+            for i in range(nx):
+                rhs_i = rhs_2[i, :].copy()
+                u_new[i, :] = self._solve_line_banded(
+                    d_field[i, :],
+                    rhs_i,
+                    self.dx[1],
+                    dt_half,
+                    decay_term,
+                    t_next,
+                )
+            self.state = u_new
+
+        elif self.ndim == 3:
+            nx, ny, nz = self.grid_points
+            decay_term = (self.decay_rate / 3.0) * self.dt
+            full_source = self.dt * source
+
+            a_y_un = self.dt * self._axis_diffusion(self.state, 1) - decay_term * self.state
+            a_z_un = self.dt * self._axis_diffusion(self.state, 2) - decay_term * self.state
+
+            rhs_1 = self.state + a_y_un + a_z_un + full_source
+
+            u_star = np.zeros((nx, ny, nz))
+            for j in range(ny):
+                for k in range(nz):
+                    rhs_jk = rhs_1[:, j, k].copy()
+                    u_star[:, j, k] = self._solve_line_banded(
+                        d_field[:, j, k],
+                        rhs_jk,
+                        self.dx[0],
+                        self.dt,
+                        decay_term,
+                        t_next,
+                    )
+
+            if self._boundary_conditions is not None:
+                u_star = self._apply_boundary_conditions(u_star)
+
+            rhs_2 = u_star - a_y_un
+            u_star_star = np.zeros((nx, ny, nz))
+            for i in range(nx):
+                for k in range(nz):
+                    rhs_ik = rhs_2[i, :, k].copy()
+                    u_star_star[i, :, k] = self._solve_line_banded(
+                        d_field[i, :, k],
+                        rhs_ik,
+                        self.dx[1],
+                        self.dt,
+                        decay_term,
+                        t_next,
+                    )
+
+            if self._boundary_conditions is not None:
+                u_star_star = self._apply_boundary_conditions(u_star_star)
+
+            rhs_3 = u_star_star - a_z_un
+            u_new = np.zeros((nx, ny, nz))
+            for i in range(nx):
+                for j in range(ny):
+                    rhs_ij = rhs_3[i, j, :].copy()
+                    u_new[i, j, :] = self._solve_line_banded(
+                        d_field[i, j, :],
+                        rhs_ij,
+                        self.dx[2],
+                        self.dt,
+                        decay_term,
+                        t_next,
+                    )
+            self.state = u_new
+
+        if self._boundary_conditions is not None:
+            self.state = self._apply_boundary_conditions(self.state)
+
     def _step_bci_opt(self) -> None:
         if self.ndim not in (1, 2, 3):
             raise NotImplementedError(f"{self.ndim}D ADI is not implemented yet")
+
+        if not self.diffusion_is_scalar():
+            source = self._compute_source_term(implicit=True, t=self.t + self.dt)
+            if source is None:
+                source = np.zeros_like(self.state)
+            return self._step_base_variable(source)
 
         if self.ndim == 1:
             t_next = self.t + self.dt
@@ -1077,24 +1438,40 @@ class _ADIUnified(Schema):
 
         return rhs_array
 
-    def _apply_bc_to_banded(self, ab: np.ndarray, rhs_array: np.ndarray, h: float, dt_sweep: float, t_eval: float) -> None:
+    def _apply_bc_to_banded(
+        self,
+        ab: np.ndarray,
+        rhs_array: np.ndarray,
+        h: float,
+        dt_sweep: float,
+        t_eval: float,
+        d_face: Optional[np.ndarray] = None,
+    ) -> None:
         """Apply boundary conditions to the banded matrix and 1D RHS array in-place."""
         if self._boundary_conditions is None:
             return
 
-        alpha = (dt_sweep * self.diffusion_coefficient) / (h**2)
-
         if isinstance(self._boundary_conditions, NeumannBC):
             flux = self._boundary_conditions._get_flux(t_eval)
-            forcing = (2 * dt_sweep * self.diffusion_coefficient * flux) / h
+            if d_face is None:
+                d_left = float(self._diffusion_value(t_eval))
+                d_right = d_left
+            else:
+                d_left = float(d_face[0])
+                d_right = float(d_face[-1])
+
+            alpha_left = (dt_sweep * d_left) / (h**2)
+            alpha_right = (dt_sweep * d_right) / (h**2)
+            forcing_left = (2 * dt_sweep * d_left * flux) / h
+            forcing_right = (2 * dt_sweep * d_right * flux) / h
             
             # Left Boundary
-            ab[0, 1] = -2 * alpha
-            rhs_array[0] -= forcing
+            ab[0, 1] = -2 * alpha_left
+            rhs_array[0] -= forcing_left
             
             # Right Boundary
-            ab[2, -2] = -2 * alpha
-            rhs_array[-1] += forcing
+            ab[2, -2] = -2 * alpha_right
+            rhs_array[-1] += forcing_right
 
         elif isinstance(self._boundary_conditions, DirichletBC):
             val = self._boundary_conditions._get_value(t_eval)

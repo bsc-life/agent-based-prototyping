@@ -1,7 +1,7 @@
 """Unified Crank-Nicolson schemas with variant selection."""
 
 import numpy as np
-from scipy.sparse import diags, kron, eye
+from scipy.sparse import diags, kron, eye, csr_matrix
 from scipy.sparse.linalg import spsolve
 
 from diffusion_schemas.base import Schema
@@ -85,26 +85,176 @@ class _CrankNicolsonUnified(Schema):
             elif self.ndim == 3:
                 self.A_impl = self._build_matrices_3d(implicit_only=True)
 
+        self._diffusion_dirty = False
+
+    def _ensure_system_matrices_current(self) -> None:
+        if self.diffusion_is_time_dependent or self._diffusion_dirty:
+            self._build_system_matrices()
+
+    def _build_conservative_operator_1d(self, d_field: np.ndarray):
+        n = self.grid_points[0]
+        dx = self.dx[0]
+        d_face = 0.5 * (d_field[:-1] + d_field[1:])
+
+        lower = d_face / (dx**2)
+        upper = d_face / (dx**2)
+
+        diag = np.zeros(n)
+        diag[1:-1] = -(d_face[1:] + d_face[:-1]) / (dx**2)
+        diag[0] = -2 * d_face[0] / (dx**2)
+        diag[-1] = -2 * d_face[-1] / (dx**2)
+
+        return diags([lower, diag, upper], [-1, 0, 1], shape=(n, n), format="csr")
+
+    def _build_conservative_operator_2d(self, d_field: np.ndarray):
+        nx, ny = self.grid_points
+        dx, dy = self.dx
+        d_x, d_y = self._diffusion_faces(d_field)
+
+        rows = []
+        cols = []
+        data = []
+
+        for i in range(nx):
+            for j in range(ny):
+                idx = i * ny + j
+
+                d_x_minus = d_x[i - 1, j] if i > 0 else d_x[0, j]
+                d_x_plus = d_x[i, j] if i < nx - 1 else d_x[-1, j]
+                d_y_minus = d_y[i, j - 1] if j > 0 else d_y[i, 0]
+                d_y_plus = d_y[i, j] if j < ny - 1 else d_y[i, -1]
+
+                diag = -(
+                    (d_x_minus + d_x_plus) / (dx**2)
+                    + (d_y_minus + d_y_plus) / (dy**2)
+                )
+                rows.append(idx)
+                cols.append(idx)
+                data.append(diag)
+
+                if i > 0:
+                    rows.append(idx)
+                    cols.append(idx - ny)
+                    data.append(d_x_minus / (dx**2))
+                if i < nx - 1:
+                    rows.append(idx)
+                    cols.append(idx + ny)
+                    data.append(d_x_plus / (dx**2))
+                if j > 0:
+                    rows.append(idx)
+                    cols.append(idx - 1)
+                    data.append(d_y_minus / (dy**2))
+                if j < ny - 1:
+                    rows.append(idx)
+                    cols.append(idx + 1)
+                    data.append(d_y_plus / (dy**2))
+
+        return csr_matrix((data, (rows, cols)), shape=(nx * ny, nx * ny))
+
+    def _build_conservative_operator_3d(self, d_field: np.ndarray):
+        nx, ny, nz = self.grid_points
+        dx, dy, dz = self.dx
+        d_x, d_y, d_z = self._diffusion_faces(d_field)
+
+        rows = []
+        cols = []
+        data = []
+
+        stride_y = nz
+        stride_x = ny * nz
+
+        for i in range(nx):
+            for j in range(ny):
+                for k in range(nz):
+                    idx = (i * ny + j) * nz + k
+
+                    d_x_minus = d_x[i - 1, j, k] if i > 0 else d_x[0, j, k]
+                    d_x_plus = d_x[i, j, k] if i < nx - 1 else d_x[-1, j, k]
+                    d_y_minus = d_y[i, j - 1, k] if j > 0 else d_y[i, 0, k]
+                    d_y_plus = d_y[i, j, k] if j < ny - 1 else d_y[i, -1, k]
+                    d_z_minus = d_z[i, j, k - 1] if k > 0 else d_z[i, j, 0]
+                    d_z_plus = d_z[i, j, k] if k < nz - 1 else d_z[i, j, -1]
+
+                    diag = -(
+                        (d_x_minus + d_x_plus) / (dx**2)
+                        + (d_y_minus + d_y_plus) / (dy**2)
+                        + (d_z_minus + d_z_plus) / (dz**2)
+                    )
+                    rows.append(idx)
+                    cols.append(idx)
+                    data.append(diag)
+
+                    if i > 0:
+                        rows.append(idx)
+                        cols.append(idx - stride_x)
+                        data.append(d_x_minus / (dx**2))
+                    if i < nx - 1:
+                        rows.append(idx)
+                        cols.append(idx + stride_x)
+                        data.append(d_x_plus / (dx**2))
+                    if j > 0:
+                        rows.append(idx)
+                        cols.append(idx - stride_y)
+                        data.append(d_y_minus / (dy**2))
+                    if j < ny - 1:
+                        rows.append(idx)
+                        cols.append(idx + stride_y)
+                        data.append(d_y_plus / (dy**2))
+                    if k > 0:
+                        rows.append(idx)
+                        cols.append(idx - 1)
+                        data.append(d_z_minus / (dz**2))
+                    if k < nz - 1:
+                        rows.append(idx)
+                        cols.append(idx + 1)
+                        data.append(d_z_plus / (dz**2))
+
+        return csr_matrix((data, (rows, cols)), shape=(nx * ny * nz, nx * ny * nz))
+
     def _build_matrices_1d(self, implicit_only: bool = False):
         n = self.grid_points[0]
         dx = self.dx[0]
+
+        if not self.diffusion_is_scalar():
+            d_field = self._diffusion_field()
+            l = self._build_conservative_operator_1d(d_field)
+            i = eye(n, format="csr")
+            a_impl = i - self.theta * self.dt * l + self.theta * self.dt * self.decay_rate * i
+            if implicit_only:
+                return a_impl
+            a_expl = i + (1 - self.theta) * self.dt * l - (1 - self.theta) * self.dt * self.decay_rate * i
+            return a_impl, a_expl
+
+        d = float(self._diffusion_value())
 
         diag_main = -2 * np.ones(n) / (dx**2)
         diag_off = np.ones(n - 1) / (dx**2)
         l = diags([diag_off, diag_main, diag_off], [-1, 0, 1], shape=(n, n), format="csr")
         i = eye(n, format="csr")
 
-        a_impl = i - self.theta * self.dt * self.diffusion_coefficient * l + self.theta * self.dt * self.decay_rate * i
+        a_impl = i - self.theta * self.dt * d * l + self.theta * self.dt * self.decay_rate * i
 
         if implicit_only:
             return a_impl
 
-        a_expl = i + (1 - self.theta) * self.dt * self.diffusion_coefficient * l - (1 - self.theta) * self.dt * self.decay_rate * i
+        a_expl = i + (1 - self.theta) * self.dt * d * l - (1 - self.theta) * self.dt * self.decay_rate * i
         return a_impl, a_expl
 
     def _build_matrices_2d(self, implicit_only: bool = False):
         nx, ny = self.grid_points
         dx, dy = self.dx
+
+        if not self.diffusion_is_scalar():
+            d_field = self._diffusion_field()
+            l = self._build_conservative_operator_2d(d_field)
+            i = eye(nx * ny, format="csr")
+            a_impl = i - self.theta * self.dt * l + self.theta * self.dt * self.decay_rate * i
+            if implicit_only:
+                return a_impl
+            a_expl = i + (1 - self.theta) * self.dt * l - (1 - self.theta) * self.dt * self.decay_rate * i
+            return a_impl, a_expl
+
+        d = float(self._diffusion_value())
 
         diag_main_x = -2 * np.ones(nx) / (dx**2)
         diag_off_x = np.ones(nx - 1) / (dx**2)
@@ -120,17 +270,29 @@ class _CrankNicolsonUnified(Schema):
         l = kron(lx, iy) + kron(ix, ly)
         i = eye(nx * ny, format="csr")
 
-        a_impl = i - self.theta * self.dt * self.diffusion_coefficient * l + self.theta * self.dt * self.decay_rate * i
+        a_impl = i - self.theta * self.dt * d * l + self.theta * self.dt * self.decay_rate * i
 
         if implicit_only:
             return a_impl
 
-        a_expl = i + (1 - self.theta) * self.dt * self.diffusion_coefficient * l - (1 - self.theta) * self.dt * self.decay_rate * i
+        a_expl = i + (1 - self.theta) * self.dt * d * l - (1 - self.theta) * self.dt * self.decay_rate * i
         return a_impl, a_expl
 
     def _build_matrices_3d(self, implicit_only: bool = False):
         nx, ny, nz = self.grid_points
         dx, dy, dz = self.dx
+
+        if not self.diffusion_is_scalar():
+            d_field = self._diffusion_field()
+            l = self._build_conservative_operator_3d(d_field)
+            i = eye(nx * ny * nz, format="csr")
+            a_impl = i - self.theta * self.dt * l + self.theta * self.dt * self.decay_rate * i
+            if implicit_only:
+                return a_impl
+            a_expl = i + (1 - self.theta) * self.dt * l - (1 - self.theta) * self.dt * self.decay_rate * i
+            return a_impl, a_expl
+
+        d = float(self._diffusion_value())
 
         diag_main_x = -2 * np.ones(nx) / (dx**2)
         diag_off_x = np.ones(nx - 1) / (dx**2)
@@ -151,15 +313,16 @@ class _CrankNicolsonUnified(Schema):
         l = kron(kron(lx, iy), iz) + kron(kron(ix, ly), iz) + kron(kron(ix, iy), lz)
         i = eye(nx * ny * nz, format="csr")
 
-        a_impl = i - self.theta * self.dt * self.diffusion_coefficient * l + self.theta * self.dt * self.decay_rate * i
+        a_impl = i - self.theta * self.dt * d * l + self.theta * self.dt * self.decay_rate * i
 
         if implicit_only:
             return a_impl
 
-        a_expl = i + (1 - self.theta) * self.dt * self.diffusion_coefficient * l - (1 - self.theta) * self.dt * self.decay_rate * i
+        a_expl = i + (1 - self.theta) * self.dt * d * l - (1 - self.theta) * self.dt * self.decay_rate * i
         return a_impl, a_expl
 
     def step(self) -> None:
+        self._ensure_system_matrices_current()
         if self._variant == "base":
             self._step_base()
         elif self._variant == "bc":
@@ -186,12 +349,12 @@ class _CrankNicolsonUnified(Schema):
         self.t += self.dt
 
     def _step_bc(self) -> None:
-        laplacian_n = self._compute_laplacian(self.state)
+        diffusion_n = self._compute_diffusion_term(self.state)
         source_n = self._compute_source_term()
         source_np1 = source_n
 
         rhs = self.state + (1 - self.theta) * self.dt * (
-            self.diffusion_coefficient * laplacian_n - self.decay_rate * self.state + source_n
+            diffusion_n - self.decay_rate * self.state + source_n
         ) + self.theta * self.dt * source_np1
 
         rhs = rhs.flatten()
@@ -207,7 +370,7 @@ class _CrankNicolsonUnified(Schema):
         self.t += self.dt
 
     def _step_bci(self) -> None:
-        laplacian_n = self._compute_laplacian(self.state)
+        diffusion_n = self._compute_diffusion_term(self.state)
         source_n = self._compute_source_term()
 
         t_next = self.t + self.dt
@@ -225,7 +388,7 @@ class _CrankNicolsonUnified(Schema):
             lhs = np.zeros_like(self.state)
 
         rhs = self.state + (1 - self.theta) * self.dt * (
-            self.diffusion_coefficient * laplacian_n - self.decay_rate * self.state + source_n
+            diffusion_n - self.decay_rate * self.state + source_n
         ) + self.theta * self.dt * (bulk_rhs_np1 + agent_source_np1)
 
         rhs = rhs.flatten()
@@ -261,9 +424,9 @@ class _CrankNicolsonUnified(Schema):
         self.t += self.dt
 
     def _step_diffusion_decay(self) -> None:
-        laplacian_n = self._compute_laplacian(self.state)
+        diffusion_n = self._compute_diffusion_term(self.state)
         rhs = self.state + (1 - self.theta) * self.dt * (
-            self.diffusion_coefficient * laplacian_n - self.decay_rate * self.state
+            diffusion_n - self.decay_rate * self.state
         )
         rhs = rhs.flatten()
 
@@ -283,6 +446,123 @@ class _CrankNicolsonUnified(Schema):
 
     def _step_agent_sources(self) -> None:
         self.state += self.dt * self.agents_rhs_contribution
+
+    def _compute_diffusion_term(self, u: np.ndarray) -> np.ndarray:
+        if self.diffusion_is_scalar():
+            d = float(self._diffusion_value())
+            return d * self._compute_laplacian(u)
+        d_field = self._diffusion_field()
+        return self._compute_conservative_diffusion(u, d_field)
+
+    def _compute_conservative_diffusion(self, u: np.ndarray, d_field: np.ndarray) -> np.ndarray:
+        if self.ndim == 1:
+            return self._conservative_diffusion_1d(u, d_field)
+        if self.ndim == 2:
+            return self._conservative_diffusion_2d(u, d_field)
+        if self.ndim == 3:
+            return self._conservative_diffusion_3d(u, d_field)
+        raise ValueError(f"Unsupported dimensions: {self.ndim}")
+
+    def _conservative_diffusion_1d(self, u: np.ndarray, d_field: np.ndarray) -> np.ndarray:
+        dx = self.dx[0]
+        n = self.grid_points[0]
+        d_face = 0.5 * (d_field[:-1] + d_field[1:])
+        flux_face = np.zeros(n + 1)
+        flux_face[1:-1] = d_face * (u[1:] - u[:-1]) / dx
+
+        if isinstance(self._boundary_conditions, NeumannBC):
+            flux_val = self._boundary_conditions._get_flux(self.t)
+        else:
+            flux_val = 0.0
+
+        flux_face[0] = -flux_val
+        flux_face[-1] = flux_val
+
+        div = (flux_face[1:] - flux_face[:-1]) / dx
+
+        if isinstance(self._boundary_conditions, DirichletBC):
+            div[0] = 0.0
+            div[-1] = 0.0
+
+        return div
+
+    def _conservative_diffusion_2d(self, u: np.ndarray, d_field: np.ndarray) -> np.ndarray:
+        dx, dy = self.dx
+        nx, ny = self.grid_points
+        d_x, d_y = self._diffusion_faces(d_field)
+
+        flux_x = d_x * (u[1:, :] - u[:-1, :]) / dx
+        flux_y = d_y * (u[:, 1:] - u[:, :-1]) / dy
+
+        flux_x_ext = np.zeros((nx + 1, ny))
+        flux_y_ext = np.zeros((nx, ny + 1))
+        flux_x_ext[1:-1, :] = flux_x
+        flux_y_ext[:, 1:-1] = flux_y
+
+        if isinstance(self._boundary_conditions, NeumannBC):
+            flux_val = self._boundary_conditions._get_flux(self.t)
+        else:
+            flux_val = 0.0
+
+        flux_x_ext[0, :] = -flux_val
+        flux_x_ext[-1, :] = flux_val
+        flux_y_ext[:, 0] = -flux_val
+        flux_y_ext[:, -1] = flux_val
+
+        div = (flux_x_ext[1:, :] - flux_x_ext[:-1, :]) / dx + (flux_y_ext[:, 1:] - flux_y_ext[:, :-1]) / dy
+
+        if isinstance(self._boundary_conditions, DirichletBC):
+            div[0, :] = 0.0
+            div[-1, :] = 0.0
+            div[:, 0] = 0.0
+            div[:, -1] = 0.0
+
+        return div
+
+    def _conservative_diffusion_3d(self, u: np.ndarray, d_field: np.ndarray) -> np.ndarray:
+        dx, dy, dz = self.dx
+        nx, ny, nz = self.grid_points
+        d_x, d_y, d_z = self._diffusion_faces(d_field)
+
+        flux_x = d_x * (u[1:, :, :] - u[:-1, :, :]) / dx
+        flux_y = d_y * (u[:, 1:, :] - u[:, :-1, :]) / dy
+        flux_z = d_z * (u[:, :, 1:] - u[:, :, :-1]) / dz
+
+        flux_x_ext = np.zeros((nx + 1, ny, nz))
+        flux_y_ext = np.zeros((nx, ny + 1, nz))
+        flux_z_ext = np.zeros((nx, ny, nz + 1))
+
+        flux_x_ext[1:-1, :, :] = flux_x
+        flux_y_ext[:, 1:-1, :] = flux_y
+        flux_z_ext[:, :, 1:-1] = flux_z
+
+        if isinstance(self._boundary_conditions, NeumannBC):
+            flux_val = self._boundary_conditions._get_flux(self.t)
+        else:
+            flux_val = 0.0
+
+        flux_x_ext[0, :, :] = -flux_val
+        flux_x_ext[-1, :, :] = flux_val
+        flux_y_ext[:, 0, :] = -flux_val
+        flux_y_ext[:, -1, :] = flux_val
+        flux_z_ext[:, :, 0] = -flux_val
+        flux_z_ext[:, :, -1] = flux_val
+
+        div = (
+            (flux_x_ext[1:, :, :] - flux_x_ext[:-1, :, :]) / dx
+            + (flux_y_ext[:, 1:, :] - flux_y_ext[:, :-1, :]) / dy
+            + (flux_z_ext[:, :, 1:] - flux_z_ext[:, :, :-1]) / dz
+        )
+
+        if isinstance(self._boundary_conditions, DirichletBC):
+            div[0, :, :] = 0.0
+            div[-1, :, :] = 0.0
+            div[:, 0, :] = 0.0
+            div[:, -1, :] = 0.0
+            div[:, :, 0] = 0.0
+            div[:, :, -1] = 0.0
+
+        return div
 
     def _apply_neumann_bc(self, rhs):
         flux = self._boundary_conditions._get_flux(self.t + self.dt)
