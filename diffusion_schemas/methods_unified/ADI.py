@@ -242,47 +242,6 @@ class _ADIUnified(Schema):
 
         return lhs_x, a_x, lhs_y, a_y, lhs_z, a_z
 
-    def _apply_bc_to_banded(
-        self,
-        ab: np.ndarray,
-        rhs_line: np.ndarray,
-        h: float,
-        dt_factor: float,
-        t_eval: float,
-        d_face: Optional[np.ndarray] = None,
-    ) -> None:
-        if self._boundary_conditions is None:
-            return
-
-        if isinstance(self._boundary_conditions, NeumannBC):
-            flux = self._boundary_conditions._get_flux(t_eval)
-            if d_face is None:
-                d_left = float(self._diffusion_value(t_eval))
-                d_right = d_left
-            else:
-                d_left = d_face[0]
-                d_right = d_face[-1]
-
-            alpha_left = dt_factor * d_left / (h**2)
-            alpha_right = dt_factor * d_right / (h**2)
-            forcing_left = (2 * dt_factor * d_left * flux) / h
-            forcing_right = (2 * dt_factor * d_right * flux) / h
-
-            ab[0, 1] = -2 * alpha_left
-            rhs_line[0] -= forcing_left
-
-            ab[2, -2] = -2 * alpha_right
-            rhs_line[-1] += forcing_right
-
-        elif isinstance(self._boundary_conditions, DirichletBC):
-            val = self._boundary_conditions._get_value(t_eval)
-            ab[1, 0] = 1.0
-            ab[0, 1] = 0.0
-            rhs_line[0] = val
-            ab[1, -1] = 1.0
-            ab[2, -2] = 0.0
-            rhs_line[-1] = val
-
     def _build_line_banded(
         self,
         d_line: np.ndarray,
@@ -943,6 +902,40 @@ class _ADIUnified(Schema):
     def _step_agent_sources(self) -> None:
         self.state += self.dt * self.agents_rhs_contribution
 
+    @staticmethod
+    def _thomas_batched(a_vec, b_mat, c_vec, d_mat):
+        """Solve N independent tridiagonal systems simultaneously (Thomas algorithm).
+
+        Parameters
+        ----------
+        a_vec : ndarray, shape (n,)   lower diagonal; a_vec[0] unused.
+        b_mat : ndarray, shape (n, N) main diagonal, one column per system.
+        c_vec : ndarray, shape (n,)   upper diagonal; c_vec[-1] unused.
+        d_mat : ndarray, shape (n, N) right-hand side.
+
+        Returns
+        -------
+        x : ndarray, shape (n, N)
+        """
+        n = b_mat.shape[0]
+        c_star = np.empty_like(b_mat)
+        d_star = np.empty_like(d_mat)
+
+        c_star[0] = c_vec[0] / b_mat[0]
+        d_star[0] = d_mat[0] / b_mat[0]
+
+        for i in range(1, n):
+            w = b_mat[i] - a_vec[i] * c_star[i - 1]
+            c_star[i] = c_vec[i] / w
+            d_star[i] = (d_mat[i] - a_vec[i] * d_star[i - 1]) / w
+
+        x = np.empty_like(d_mat)
+        x[-1] = d_star[-1]
+        for i in range(n - 2, -1, -1):
+            x[i] = d_star[i] - c_star[i] * x[i + 1]
+
+        return x
+
     def _compute_diffusion_term(self, u: np.ndarray) -> np.ndarray:
         if self.diffusion_is_scalar():
             d = float(self._diffusion_value())
@@ -1246,16 +1239,25 @@ class _ADIUnified(Schema):
                 rhs_1[:, 0]  -= explicit_y_forcing
                 rhs_1[:, -1] += explicit_y_forcing
 
-            u_star = np.zeros((nx, ny))
-            for j in range(ny):
-                ab_x = np.zeros((3, nx))
-                ab_x[0, 1:] = -alpha_x
-                ab_x[2, :-1] = -alpha_x
-                ab_x[1, :] = 1.0 + 2*alpha_x + decay_term + dt_half * source_lhs[:, j]
-                
-                rhs_1_j = rhs_1[:, j].copy()
-                self._apply_bc_to_banded(ab_x, rhs_1_j, dx, dt_half, t_eval=t_mid)
-                u_star[:, j] = solve_banded((1, 1), ab_x, rhs_1_j)
+            is_neumann_2d = isinstance(self._boundary_conditions, NeumannBC)
+            has_dirichlet_2d = isinstance(self._boundary_conditions, DirichletBC)
+
+            a_x_vec = np.full(nx, -alpha_x); a_x_vec[0] = 0.0
+            c_x_vec = np.full(nx, -alpha_x); c_x_vec[-1] = 0.0
+            b_x_mat = (1.0 + 2*alpha_x + decay_term) + dt_half * source_lhs  # (nx, ny)
+            d_x_mat = rhs_1.copy()  # (nx, ny)
+
+            if is_neumann_2d:
+                flux_mid = self._boundary_conditions._get_flux(t_mid)
+                forcing_x = dt_half * d * 2 * flux_mid / dx
+                c_x_vec[0] = -2*alpha_x; a_x_vec[-1] = -2*alpha_x
+                d_x_mat[0, :] -= forcing_x; d_x_mat[-1, :] += forcing_x
+            elif has_dirichlet_2d:
+                val_mid = self._boundary_conditions._get_value(t_mid)
+                b_x_mat[0, :] = 1.0; c_x_vec[0] = 0.0; d_x_mat[0, :] = val_mid
+                b_x_mat[-1, :] = 1.0; a_x_vec[-1] = 0.0; d_x_mat[-1, :] = val_mid
+
+            u_star = self._thomas_batched(a_x_vec, b_x_mat, c_x_vec, d_x_mat)
 
             if isinstance(self._boundary_conditions, DirichletBC):
                 val = self._boundary_conditions._get_value(t_mid)
@@ -1281,17 +1283,23 @@ class _ADIUnified(Schema):
                 rhs_2[0, :]  -= explicit_x_forcing
                 rhs_2[-1, :] += explicit_x_forcing
 
-            u_new_T = np.zeros((ny, nx))
-            for i in range(nx):
-                ab_y = np.zeros((3, ny))
-                ab_y[0, 1:] = -alpha_y
-                ab_y[2, :-1] = -alpha_y
-                ab_y[1, :] = 1.0 + 2*alpha_y + decay_term + dt_half * source_lhs[i, :]
-                
-                rhs_2_i = rhs_2[i, :].copy()
-                self._apply_bc_to_banded(ab_y, rhs_2_i, dy, dt_half, t_eval=self.t + self.dt)
-                u_new_T[:, i] = solve_banded((1, 1), ab_y, rhs_2_i)  
-            u_new = u_new_T.T 
+            # --- SWEEP 2: Explicit X, Implicit Y ---
+            a_y_vec = np.full(ny, -alpha_y); a_y_vec[0] = 0.0
+            c_y_vec = np.full(ny, -alpha_y); c_y_vec[-1] = 0.0
+            b_y_mat = (1.0 + 2*alpha_y + decay_term) + dt_half * source_lhs.T  # (ny, nx)
+            d_y_mat = rhs_2.T.copy()  # (ny, nx)
+
+            if is_neumann_2d:
+                flux_next = self._boundary_conditions._get_flux(self.t + self.dt)
+                forcing_y = dt_half * d * 2 * flux_next / dy
+                c_y_vec[0] = -2*alpha_y; a_y_vec[-1] = -2*alpha_y
+                d_y_mat[0, :] -= forcing_y; d_y_mat[-1, :] += forcing_y
+            elif has_dirichlet_2d:
+                val_next = self._boundary_conditions._get_value(self.t + self.dt)
+                b_y_mat[0, :] = 1.0; c_y_vec[0] = 0.0; d_y_mat[0, :] = val_next
+                b_y_mat[-1, :] = 1.0; a_y_vec[-1] = 0.0; d_y_mat[-1, :] = val_next
+
+            u_new = self._thomas_batched(a_y_vec, b_y_mat, c_y_vec, d_y_mat).T  # (nx, ny)
 
             if isinstance(self._boundary_conditions, DirichletBC):
                 val = self._boundary_conditions._get_value(self.t + self.dt)
@@ -1342,17 +1350,25 @@ class _ADIUnified(Schema):
                 rhs_1[:, :, 0]  -= self.dt * d * 2 * flux / dz
                 rhs_1[:, :, -1] += self.dt * d * 2 * flux / dz
 
-            u_star = np.zeros((nx, ny, nz))
-            for j in range(ny):
-                for k in range(nz):
-                    ab_x = np.zeros((3, nx))
-                    ab_x[0, 1:] = -alpha_x
-                    ab_x[2, :-1] = -alpha_x
-                    ab_x[1, :] = 1.0 + 2*alpha_x + decay_term + (self.dt * source_lhs[:, j, k] / 3.0)
-                    
-                    rhs_1_jk = rhs_1[:, j, k].copy()
-                    self._apply_bc_to_banded(ab_x, rhs_1_jk, dx, self.dt, t_eval=t_next)
-                    u_star[:, j, k] = solve_banded((1, 1), ab_x, rhs_1_jk)
+            is_neumann_3d = isinstance(self._boundary_conditions, NeumannBC)
+            has_dirichlet_3d = isinstance(self._boundary_conditions, DirichletBC)
+
+            a_x_vec = np.full(nx, -alpha_x); a_x_vec[0] = 0.0
+            c_x_vec = np.full(nx, -alpha_x); c_x_vec[-1] = 0.0
+            b_x_mat = (1.0 + 2*alpha_x + decay_term) + (self.dt / 3.0) * source_lhs.reshape(nx, ny*nz)
+            d_x_mat = rhs_1.reshape(nx, ny*nz).copy()
+
+            if is_neumann_3d:
+                flux = self._boundary_conditions._get_flux(t_next)
+                forcing_x = self.dt * d * 2 * flux / dx
+                c_x_vec[0] = -2*alpha_x; a_x_vec[-1] = -2*alpha_x
+                d_x_mat[0, :] -= forcing_x; d_x_mat[-1, :] += forcing_x
+            elif has_dirichlet_3d:
+                val = self._boundary_conditions._get_value(t_next)
+                b_x_mat[0, :] = 1.0; c_x_vec[0] = 0.0; d_x_mat[0, :] = val
+                b_x_mat[-1, :] = 1.0; a_x_vec[-1] = 0.0; d_x_mat[-1, :] = val
+
+            u_star = self._thomas_batched(a_x_vec, b_x_mat, c_x_vec, d_x_mat).reshape(nx, ny, nz)
 
             if isinstance(self._boundary_conditions, DirichletBC):
                 val = self._boundary_conditions._get_value(t_next)
@@ -1363,17 +1379,22 @@ class _ADIUnified(Schema):
             # --- SWEEP 2: Y-direction ---
             rhs_2 = u_star - a_y_un
 
-            u_star_star = np.zeros((nx, ny, nz))
-            for i in range(nx):
-                for k in range(nz):
-                    ab_y = np.zeros((3, ny))
-                    ab_y[0, 1:] = -alpha_y
-                    ab_y[2, :-1] = -alpha_y
-                    ab_y[1, :] = 1.0 + 2*alpha_y + decay_term + (self.dt * source_lhs[i, :, k] / 3.0)
-                    
-                    rhs_2_ik = rhs_2[i, :, k].copy()
-                    self._apply_bc_to_banded(ab_y, rhs_2_ik, dy, self.dt, t_eval=t_next)
-                    u_star_star[i, :, k] = solve_banded((1, 1), ab_y, rhs_2_ik)
+            a_y_vec = np.full(ny, -alpha_y); a_y_vec[0] = 0.0
+            c_y_vec = np.full(ny, -alpha_y); c_y_vec[-1] = 0.0
+            b_y_mat = (1.0 + 2*alpha_y + decay_term) + (self.dt / 3.0) * source_lhs.transpose(1, 0, 2).reshape(ny, nx*nz)
+            d_y_mat = rhs_2.transpose(1, 0, 2).reshape(ny, nx*nz).copy()
+
+            if is_neumann_3d:
+                flux = self._boundary_conditions._get_flux(t_next)
+                forcing_y = self.dt * d * 2 * flux / dy
+                c_y_vec[0] = -2*alpha_y; a_y_vec[-1] = -2*alpha_y
+                d_y_mat[0, :] -= forcing_y; d_y_mat[-1, :] += forcing_y
+            elif has_dirichlet_3d:
+                val = self._boundary_conditions._get_value(t_next)
+                b_y_mat[0, :] = 1.0; c_y_vec[0] = 0.0; d_y_mat[0, :] = val
+                b_y_mat[-1, :] = 1.0; a_y_vec[-1] = 0.0; d_y_mat[-1, :] = val
+
+            u_star_star = self._thomas_batched(a_y_vec, b_y_mat, c_y_vec, d_y_mat).reshape(ny, nx, nz).transpose(1, 0, 2)
 
             if isinstance(self._boundary_conditions, DirichletBC):
                 val = self._boundary_conditions._get_value(t_next)
@@ -1384,17 +1405,22 @@ class _ADIUnified(Schema):
             # --- SWEEP 3: Z-direction ---
             rhs_3 = u_star_star - a_z_un
 
-            u_new = np.zeros((nx, ny, nz))
-            for i in range(nx):
-                for j in range(ny):
-                    ab_z = np.zeros((3, nz))
-                    ab_z[0, 1:] = -alpha_z
-                    ab_z[2, :-1] = -alpha_z
-                    ab_z[1, :] = 1.0 + 2*alpha_z + decay_term + (self.dt * source_lhs[i, j, :] / 3.0)
-                    
-                    rhs_3_ij = rhs_3[i, j, :].copy()
-                    self._apply_bc_to_banded(ab_z, rhs_3_ij, dz, self.dt, t_eval=t_next)
-                    u_new[i, j, :] = solve_banded((1, 1), ab_z, rhs_3_ij)
+            a_z_vec = np.full(nz, -alpha_z); a_z_vec[0] = 0.0
+            c_z_vec = np.full(nz, -alpha_z); c_z_vec[-1] = 0.0
+            b_z_mat = (1.0 + 2*alpha_z + decay_term) + (self.dt / 3.0) * source_lhs.transpose(2, 0, 1).reshape(nz, nx*ny)
+            d_z_mat = rhs_3.transpose(2, 0, 1).reshape(nz, nx*ny).copy()
+
+            if is_neumann_3d:
+                flux = self._boundary_conditions._get_flux(t_next)
+                forcing_z = self.dt * d * 2 * flux / dz
+                c_z_vec[0] = -2*alpha_z; a_z_vec[-1] = -2*alpha_z
+                d_z_mat[0, :] -= forcing_z; d_z_mat[-1, :] += forcing_z
+            elif has_dirichlet_3d:
+                val = self._boundary_conditions._get_value(t_next)
+                b_z_mat[0, :] = 1.0; c_z_vec[0] = 0.0; d_z_mat[0, :] = val
+                b_z_mat[-1, :] = 1.0; a_z_vec[-1] = 0.0; d_z_mat[-1, :] = val
+
+            u_new = self._thomas_batched(a_z_vec, b_z_mat, c_z_vec, d_z_mat).reshape(nz, nx, ny).transpose(1, 2, 0)
 
             if isinstance(self._boundary_conditions, DirichletBC):
                 val = self._boundary_conditions._get_value(t_next)

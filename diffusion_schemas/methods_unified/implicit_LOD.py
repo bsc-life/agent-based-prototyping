@@ -731,6 +731,40 @@ class _ImplicitLODUnified(Schema):
     def _step_agent_sources(self) -> None:
         self.state += self.dt * self.agents_rhs_contribution
 
+    @staticmethod
+    def _thomas_batched(a_vec, b_mat, c_vec, d_mat):
+        """Solve N independent tridiagonal systems simultaneously (Thomas algorithm).
+
+        Parameters
+        ----------
+        a_vec : ndarray, shape (n,)   lower diagonal; a_vec[0] unused.
+        b_mat : ndarray, shape (n, N) main diagonal, one column per system.
+        c_vec : ndarray, shape (n,)   upper diagonal; c_vec[-1] unused.
+        d_mat : ndarray, shape (n, N) right-hand side.
+
+        Returns
+        -------
+        x : ndarray, shape (n, N)
+        """
+        n = b_mat.shape[0]
+        c_star = np.empty_like(b_mat)
+        d_star = np.empty_like(d_mat)
+
+        c_star[0] = c_vec[0] / b_mat[0]
+        d_star[0] = d_mat[0] / b_mat[0]
+
+        for i in range(1, n):
+            w = b_mat[i] - a_vec[i] * c_star[i - 1]
+            c_star[i] = c_vec[i] / w
+            d_star[i] = (d_mat[i] - a_vec[i] * d_star[i - 1]) / w
+
+        x = np.empty_like(d_mat)
+        x[-1] = d_star[-1]
+        for i in range(n - 2, -1, -1):
+            x[i] = d_star[i] - c_star[i] * x[i + 1]
+
+        return x
+
     def _step_bci_opt(self) -> None:
         """Perform one LOD time step with integrated BCs."""
         self._ensure_system_matrix_current()
@@ -816,38 +850,25 @@ class _ImplicitLODUnified(Schema):
                 # Solve Ax * U = rhs_2d (all columns at once)
                 u_star = self._lu_x.solve(rhs_2d)
             else:
-                u_star = np.zeros((Nx, Ny))
                 alpha_x = self.dt * self.diffusion_coefficient / (self.dx[0]**2)
                 decay_term = 0.5 * self.dt * self.decay_rate
-                
-                # Pre-fetch BC values 
+
+                a_x = np.full(Nx, -alpha_x); a_x[0] = 0.0
+                c_x = np.full(Nx, -alpha_x); c_x[-1] = 0.0
+                b_x = (1.0 + 2*alpha_x + decay_term) + (self.dt / 2.0) * source_lhs  # (Nx, Ny)
+                d_x = rhs_2d.copy()  # (Nx, Ny)
+
                 if is_neumann:
                     bc_val_x = self._boundary_conditions._get_flux(self.t + self.dt)
                     forcing_x = (2 * self.dt * self.diffusion_coefficient * bc_val_x) / self.dx[0]
+                    c_x[0] = -2*alpha_x; a_x[-1] = -2*alpha_x
+                    d_x[0, :] -= forcing_x; d_x[-1, :] += forcing_x
                 elif has_dirichlet:
                     bc_val_x = self._boundary_conditions._get_value(self.t + self.dt)
+                    b_x[0, :] = 1.0; c_x[0] = 0.0; d_x[0, :] = bc_val_x
+                    b_x[-1, :] = 1.0; a_x[-1] = 0.0; d_x[-1, :] = bc_val_x
 
-                for j in range(Ny):
-                    # 1. Build banded matrix (3, Nx)
-                    ab_x = np.zeros((3, Nx))
-                    ab_x[0, 1:] = -alpha_x  # Upper
-                    ab_x[2, :-1] = -alpha_x # Lower
-                    ab_x[1, :] = 1.0 + 2*alpha_x + decay_term + (self.dt / 2.0) * source_lhs[:, j] # Main
-                    
-                    rhs_j = rhs_2d[:, j].copy()
-
-                    # 2. Apply Boundary Conditions
-                    if is_neumann:
-                        ab_x[0, 1] = -2 * alpha_x
-                        ab_x[2, -2] = -2 * alpha_x
-                        rhs_j[0] -= forcing_x
-                        rhs_j[-1] += forcing_x
-                    elif has_dirichlet:
-                        ab_x[1, 0] = 1.0; ab_x[0, 1] = 0.0; rhs_j[0] = bc_val_x
-                        ab_x[1, -1] = 1.0; ab_x[2, -2] = 0.0; rhs_j[-1] = bc_val_x
-
-                    # 3. Solve and store
-                    u_star[:, j] = solve_banded((1, 1), ab_x, rhs_j)
+                u_star = self._thomas_batched(a_x, b_x, c_x, d_x)
 
             # --- SWEEP 2: Y-Direction ---
             if (not has_per_node_source) and (not has_dirichlet) and getattr(self, '_lu_y', None) is not None:
@@ -855,37 +876,24 @@ class _ImplicitLODUnified(Schema):
                 u_new_T = self._lu_y.solve(u_star.T)
                 u_new = u_new_T.T
             else:
-                u_new = np.zeros((Nx, Ny))
                 alpha_y = self.dt * self.diffusion_coefficient / (self.dx[1]**2)
-                
-                # Pre-fetch BC values 
+
+                a_y = np.full(Ny, -alpha_y); a_y[0] = 0.0
+                c_y = np.full(Ny, -alpha_y); c_y[-1] = 0.0
+                b_y = (1.0 + 2*alpha_y + decay_term) + (self.dt / 2.0) * source_lhs.T  # (Ny, Nx)
+                d_y = u_star.T.copy()  # (Ny, Nx)
+
                 if is_neumann:
                     bc_val_y = self._boundary_conditions._get_flux(self.t + self.dt)
                     forcing_y = (2 * self.dt * self.diffusion_coefficient * bc_val_y) / self.dx[1]
+                    c_y[0] = -2*alpha_y; a_y[-1] = -2*alpha_y
+                    d_y[0, :] -= forcing_y; d_y[-1, :] += forcing_y
                 elif has_dirichlet:
                     bc_val_y = self._boundary_conditions._get_value(self.t + self.dt)
+                    b_y[0, :] = 1.0; c_y[0] = 0.0; d_y[0, :] = bc_val_y
+                    b_y[-1, :] = 1.0; a_y[-1] = 0.0; d_y[-1, :] = bc_val_y
 
-                for i in range(Nx):
-                    # 1. Build banded matrix (3, Ny)
-                    ab_y = np.zeros((3, Ny))
-                    ab_y[0, 1:] = -alpha_y
-                    ab_y[2, :-1] = -alpha_y
-                    ab_y[1, :] = 1.0 + 2*alpha_y + decay_term + (self.dt / 2.0) * source_lhs[i, :]
-                    
-                    rhs_i = u_star[i, :].copy()
-
-                    # 2. Apply Boundary Conditions
-                    if is_neumann:
-                        ab_y[0, 1] = -2 * alpha_y
-                        ab_y[2, -2] = -2 * alpha_y
-                        rhs_i[0] -= forcing_y
-                        rhs_i[-1] += forcing_y
-                    elif has_dirichlet:
-                        ab_y[1, 0] = 1.0; ab_y[0, 1] = 0.0; rhs_i[0] = bc_val_y
-                        ab_y[1, -1] = 1.0; ab_y[2, -2] = 0.0; rhs_i[-1] = bc_val_y
-
-                    # 3. Solve and store
-                    u_new[i, :] = solve_banded((1, 1), ab_y, rhs_i)
+                u_new = self._thomas_batched(a_y, b_y, c_y, d_y).T  # transpose back to (Nx, Ny)
 
             self.state = u_new
 
@@ -906,34 +914,24 @@ class _ImplicitLODUnified(Schema):
                 u_star_flat = self._lu_x.solve(rhs_x_flat)
                 u_star = u_star_flat.reshape(Nx, Ny, Nz)
             else:
-                u_star = np.zeros((Nx, Ny, Nz))
                 alpha_x = self.dt * self.diffusion_coefficient / (self.dx[0]**2)
-                
+
+                a_x = np.full(Nx, -alpha_x); a_x[0] = 0.0
+                c_x = np.full(Nx, -alpha_x); c_x[-1] = 0.0
+                b_x = (1.0 + 2*alpha_x + decay_term) + (self.dt / 3.0) * source_lhs.reshape(Nx, Ny*Nz)
+                d_x = rhs_x.reshape(Nx, Ny*Nz).copy()
+
                 if is_neumann:
                     bc_val_x = self._boundary_conditions._get_flux(self.t + self.dt)
                     forcing_x = (2 * self.dt * self.diffusion_coefficient * bc_val_x) / self.dx[0]
+                    c_x[0] = -2*alpha_x; a_x[-1] = -2*alpha_x
+                    d_x[0, :] -= forcing_x; d_x[-1, :] += forcing_x
                 elif has_dirichlet:
                     bc_val_x = self._boundary_conditions._get_value(self.t + self.dt)
+                    b_x[0, :] = 1.0; c_x[0] = 0.0; d_x[0, :] = bc_val_x
+                    b_x[-1, :] = 1.0; a_x[-1] = 0.0; d_x[-1, :] = bc_val_x
 
-                for j in range(Ny):
-                    for k in range(Nz):
-                        ab_x = np.zeros((3, Nx))
-                        ab_x[0, 1:] = -alpha_x
-                        ab_x[2, :-1] = -alpha_x
-                        ab_x[1, :] = 1.0 + 2*alpha_x + decay_term + (self.dt / 3.0) * source_lhs[:, j, k]
-                        
-                        rhs_jk = rhs_x[:, j, k].copy()
-
-                        if is_neumann:
-                            ab_x[0, 1] = -2 * alpha_x
-                            ab_x[2, -2] = -2 * alpha_x
-                            rhs_jk[0] -= forcing_x
-                            rhs_jk[-1] += forcing_x
-                        elif has_dirichlet:
-                            ab_x[1, 0] = 1.0; ab_x[0, 1] = 0.0; rhs_jk[0] = bc_val_x
-                            ab_x[1, -1] = 1.0; ab_x[2, -2] = 0.0; rhs_jk[-1] = bc_val_x
-
-                        u_star[:, j, k] = solve_banded((1, 1), ab_x, rhs_jk)
+                u_star = self._thomas_batched(a_x, b_x, c_x, d_x).reshape(Nx, Ny, Nz)
 
             # --- SWEEP 2: Y-Direction ---
             if (not has_per_node_source) and (not has_dirichlet) and getattr(self, '_lu_y', None) is not None:
@@ -941,34 +939,24 @@ class _ImplicitLODUnified(Schema):
                 u_star_star_flat = self._lu_y.solve(u_star_T)
                 u_star_star = u_star_star_flat.reshape(Ny, Nx, Nz).transpose(1, 0, 2)
             else:
-                u_star_star = np.zeros((Nx, Ny, Nz))
                 alpha_y = self.dt * self.diffusion_coefficient / (self.dx[1]**2)
-                
+
+                a_y = np.full(Ny, -alpha_y); a_y[0] = 0.0
+                c_y = np.full(Ny, -alpha_y); c_y[-1] = 0.0
+                b_y = (1.0 + 2*alpha_y + decay_term) + (self.dt / 3.0) * source_lhs.transpose(1, 0, 2).reshape(Ny, Nx*Nz)
+                d_y = u_star.transpose(1, 0, 2).reshape(Ny, Nx*Nz).copy()
+
                 if is_neumann:
                     bc_val_y = self._boundary_conditions._get_flux(self.t + self.dt)
                     forcing_y = (2 * self.dt * self.diffusion_coefficient * bc_val_y) / self.dx[1]
+                    c_y[0] = -2*alpha_y; a_y[-1] = -2*alpha_y
+                    d_y[0, :] -= forcing_y; d_y[-1, :] += forcing_y
                 elif has_dirichlet:
                     bc_val_y = self._boundary_conditions._get_value(self.t + self.dt)
+                    b_y[0, :] = 1.0; c_y[0] = 0.0; d_y[0, :] = bc_val_y
+                    b_y[-1, :] = 1.0; a_y[-1] = 0.0; d_y[-1, :] = bc_val_y
 
-                for i in range(Nx):
-                    for k in range(Nz):
-                        ab_y = np.zeros((3, Ny))
-                        ab_y[0, 1:] = -alpha_y
-                        ab_y[2, :-1] = -alpha_y
-                        ab_y[1, :] = 1.0 + 2*alpha_y + decay_term + (self.dt / 3.0) * source_lhs[i, :, k]
-                        
-                        rhs_ik = u_star[i, :, k].copy()
-
-                        if is_neumann:
-                            ab_y[0, 1] = -2 * alpha_y
-                            ab_y[2, -2] = -2 * alpha_y
-                            rhs_ik[0] -= forcing_y
-                            rhs_ik[-1] += forcing_y
-                        elif has_dirichlet:
-                            ab_y[1, 0] = 1.0; ab_y[0, 1] = 0.0; rhs_ik[0] = bc_val_y
-                            ab_y[1, -1] = 1.0; ab_y[2, -2] = 0.0; rhs_ik[-1] = bc_val_y
-
-                        u_star_star[i, :, k] = solve_banded((1, 1), ab_y, rhs_ik)
+                u_star_star = self._thomas_batched(a_y, b_y, c_y, d_y).reshape(Ny, Nx, Nz).transpose(1, 0, 2)
 
             # --- SWEEP 3: Z-Direction ---
             if (not has_per_node_source) and (not has_dirichlet) and getattr(self, '_lu_z', None) is not None:
@@ -976,34 +964,24 @@ class _ImplicitLODUnified(Schema):
                 u_final_flat = self._lu_z.solve(u_star_star_T)
                 u_new = u_final_flat.reshape(Nz, Nx, Ny).transpose(1, 2, 0)
             else:
-                u_new = np.zeros((Nx, Ny, Nz))
                 alpha_z = self.dt * self.diffusion_coefficient / (self.dx[2]**2)
-                
+
+                a_z = np.full(Nz, -alpha_z); a_z[0] = 0.0
+                c_z = np.full(Nz, -alpha_z); c_z[-1] = 0.0
+                b_z = (1.0 + 2*alpha_z + decay_term) + (self.dt / 3.0) * source_lhs.transpose(2, 0, 1).reshape(Nz, Nx*Ny)
+                d_z = u_star_star.transpose(2, 0, 1).reshape(Nz, Nx*Ny).copy()
+
                 if is_neumann:
                     bc_val_z = self._boundary_conditions._get_flux(self.t + self.dt)
                     forcing_z = (2 * self.dt * self.diffusion_coefficient * bc_val_z) / self.dx[2]
+                    c_z[0] = -2*alpha_z; a_z[-1] = -2*alpha_z
+                    d_z[0, :] -= forcing_z; d_z[-1, :] += forcing_z
                 elif has_dirichlet:
                     bc_val_z = self._boundary_conditions._get_value(self.t + self.dt)
+                    b_z[0, :] = 1.0; c_z[0] = 0.0; d_z[0, :] = bc_val_z
+                    b_z[-1, :] = 1.0; a_z[-1] = 0.0; d_z[-1, :] = bc_val_z
 
-                for i in range(Nx):
-                    for j in range(Ny):
-                        ab_z = np.zeros((3, Nz))
-                        ab_z[0, 1:] = -alpha_z
-                        ab_z[2, :-1] = -alpha_z
-                        ab_z[1, :] = 1.0 + 2*alpha_z + decay_term + (self.dt / 3.0) * source_lhs[i, j, :]
-                        
-                        rhs_ij = u_star_star[i, j, :].copy()
-
-                        if is_neumann:
-                            ab_z[0, 1] = -2 * alpha_z
-                            ab_z[2, -2] = -2 * alpha_z
-                            rhs_ij[0] -= forcing_z
-                            rhs_ij[-1] += forcing_z
-                        elif has_dirichlet:
-                            ab_z[1, 0] = 1.0; ab_z[0, 1] = 0.0; rhs_ij[0] = bc_val_z
-                            ab_z[1, -1] = 1.0; ab_z[2, -2] = 0.0; rhs_ij[-1] = bc_val_z
-
-                        u_new[i, j, :] = solve_banded((1, 1), ab_z, rhs_ij)
+                u_new = self._thomas_batched(a_z, b_z, c_z, d_z).reshape(Nz, Nx, Ny).transpose(1, 2, 0)
 
             self.state = u_new
         
