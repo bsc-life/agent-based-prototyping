@@ -20,7 +20,7 @@ from benchmarking.error_metrics import (
     compute_l2_error, compute_linf_error
 )
 from benchmarking.visualization import (
-    plot_final_comparison, plot_error_distribution,
+    plot_final_comparison, plot_error_distribution, plot_3d_error_surface,
     plot_time_evolution, plot_error_vs_time, plot_convergence_analysis,
     plot_method_comparison
 )
@@ -271,6 +271,14 @@ class BenchmarkRunner:
             # Error distribution plot
             fig_path = scenario_dir / f"{schema_name}_error_dist.png"
             plot_error_distribution(
+                final_state, analytical_final, coordinates,
+                schema_name, scenario['name'], output_path=fig_path
+            )
+            result['figures'].append(str(fig_path))
+
+            # 3D error surface plot
+            fig_path = scenario_dir / f"{schema_name}_error_3d.png"
+            plot_3d_error_surface(
                 final_state, analytical_final, coordinates,
                 schema_name, scenario['name'], output_path=fig_path
             )

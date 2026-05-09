@@ -286,25 +286,79 @@ def plot_error_distribution(numerical: np.ndarray,
         axes[1].grid(True, alpha=0.3, axis='y')
         
     elif ndim == 3:
-        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-        
         x, y, z = coordinates
-        center_idx = error.shape[2] // 2
-        error_slice = error[:, :, center_idx]
-        
-        im = axes[0].contourf(x[:, :, center_idx], y[:, :, center_idx], error_slice, 
-                             levels=20, cmap='hot')
-        axes[0].set_xlabel('x')
-        axes[0].set_ylabel('y')
-        axes[0].set_title(f'{error_label} Heatmap (center slice)')
-        axes[0].set_aspect('equal')
-        plt.colorbar(im, ax=axes[0])
-        
-        axes[1].hist(error.flatten(), bins=50, edgecolor='black', alpha=0.7)
-        axes[1].set_xlabel(error_label)
-        axes[1].set_ylabel('Frequency')
-        axes[1].set_title('Error Distribution')
-        axes[1].grid(True, alpha=0.3, axis='y')
+        nx, ny, nz = error.shape
+        cx, cy, cz = nx // 2, ny // 2, nz // 2
+
+        err_vmax = error.max()
+        norm = colors.Normalize(vmin=0.0, vmax=err_vmax)
+
+        fig, axes = plt.subplots(3, 3, figsize=(15, 13))
+
+        # --- Row 0: orthogonal center slices ---
+        # XY slice at center Z
+        im00 = axes[0, 0].pcolormesh(x[:, :, cz], y[:, :, cz], error[:, :, cz],
+                                     shading='auto', cmap='hot', norm=norm)
+        axes[0, 0].set_xlabel('x')
+        axes[0, 0].set_ylabel('y')
+        axes[0, 0].set_title('XY slice (z=center)')
+        axes[0, 0].set_aspect('equal')
+        plt.colorbar(im00, ax=axes[0, 0])
+
+        # XZ slice at center Y
+        im01 = axes[0, 1].pcolormesh(x[:, cy, :], z[:, cy, :], error[:, cy, :],
+                                     shading='auto', cmap='hot', norm=norm)
+        axes[0, 1].set_xlabel('x')
+        axes[0, 1].set_ylabel('z')
+        axes[0, 1].set_title('XZ slice (y=center)')
+        axes[0, 1].set_aspect('equal')
+        plt.colorbar(im01, ax=axes[0, 1])
+
+        # YZ slice at center X
+        im02 = axes[0, 2].pcolormesh(y[cx, :, :], z[cx, :, :], error[cx, :, :],
+                                     shading='auto', cmap='hot', norm=norm)
+        axes[0, 2].set_xlabel('y')
+        axes[0, 2].set_ylabel('z')
+        axes[0, 2].set_title('YZ slice (x=center)')
+        axes[0, 2].set_aspect('equal')
+        plt.colorbar(im02, ax=axes[0, 2])
+
+        # --- Row 1: max projections along all axes ---
+        # Max over Z → XY plane
+        im10 = axes[1, 0].pcolormesh(x[:, :, 0], y[:, :, 0], error.max(axis=2),
+                                     shading='auto', cmap='hot', norm=norm)
+        axes[1, 0].set_xlabel('x')
+        axes[1, 0].set_ylabel('y')
+        axes[1, 0].set_title('Max projection (along Z)')
+        axes[1, 0].set_aspect('equal')
+        plt.colorbar(im10, ax=axes[1, 0])
+
+        # Max over Y → XZ plane
+        im11 = axes[1, 1].pcolormesh(x[:, 0, :], z[:, 0, :], error.max(axis=1),
+                                     shading='auto', cmap='hot', norm=norm)
+        axes[1, 1].set_xlabel('x')
+        axes[1, 1].set_ylabel('z')
+        axes[1, 1].set_title('Max projection (along Y)')
+        axes[1, 1].set_aspect('equal')
+        plt.colorbar(im11, ax=axes[1, 1])
+
+        # Max over X → YZ plane
+        im12 = axes[1, 2].pcolormesh(y[0, :, :], z[0, :, :], error.max(axis=0),
+                                     shading='auto', cmap='hot', norm=norm)
+        axes[1, 2].set_xlabel('y')
+        axes[1, 2].set_ylabel('z')
+        axes[1, 2].set_title('Max projection (along X)')
+        axes[1, 2].set_aspect('equal')
+        plt.colorbar(im12, ax=axes[1, 2])
+
+        # --- Row 2: histogram + unused panels ---
+        axes[2, 0].hist(error.flatten(), bins=50, edgecolor='black', alpha=0.7)
+        axes[2, 0].set_xlabel(error_label)
+        axes[2, 0].set_ylabel('Frequency')
+        axes[2, 0].set_title('Error Distribution')
+        axes[2, 0].grid(True, alpha=0.3, axis='y')
+        axes[2, 1].axis('off')
+        axes[2, 2].axis('off')
     
     fig.suptitle(f'{schema_name} - {scenario_name}: Error Analysis', 
                  fontsize=14, fontweight='bold')
@@ -316,6 +370,202 @@ def plot_error_distribution(numerical: np.ndarray,
         plt.close(fig)
         return None
     
+    return fig
+
+
+def plot_3d_error_surface(numerical: np.ndarray,
+                         analytical: np.ndarray,
+                         coordinates: Union[np.ndarray, Tuple[np.ndarray, ...]],
+                         schema_name: str,
+                         scenario_name: str,
+                         output_path: Optional[Union[str, Path]] = None,
+                         relative: bool = False,
+                         percentile_threshold: float = 75.0) -> Optional[plt.Figure]:
+    """
+    Plot pointwise error using true 3D visualizations.
+
+    The rendering strategy adapts to the data dimensionality:
+
+    * **1D** — ``ax.bar3d`` bar chart: each grid point becomes a bar whose
+      height equals the pointwise error, coloured by magnitude via ``cm.hot``.
+      Provides spatial structure that a plain 2D line cannot convey.
+
+    * **2D** — Two panels side-by-side:
+      - *Left*: ``plot_surface`` with a floor shadow (``contourf`` projected
+        onto z=0).  Peaks reveal the spatial error hotspots.
+      - *Right*: 2D ``pcolormesh`` top-view heatmap for orientation.
+      Large grids (>80 pts per side) are down-sampled to keep rendering fast.
+
+    * **3D** — Two panels side-by-side:
+      - *Left*: ``scatter`` of voxels whose error is at or above
+        ``percentile_threshold`` (default 75th percentile), coloured and
+        semi-transparent.  Reveals where errors concentrate in 3D space.
+      - *Right*: Error histogram with a vertical dashed line marking the
+        percentile threshold.
+
+    Parameters
+    ----------
+    numerical : np.ndarray
+        Numerical solution.
+    analytical : np.ndarray
+        Analytical solution.
+    coordinates : np.ndarray or tuple of np.ndarray
+        Coordinate arrays (1D) or meshgrids (2D/3D).
+    schema_name : str
+        Name of the numerical schema.
+    scenario_name : str
+        Name of the test scenario.
+    output_path : str or Path, optional
+        If provided, save figure to this path.
+    relative : bool, optional
+        If True, compute relative error instead of absolute error.
+    percentile_threshold : float, optional
+        Percentile of voxels to highlight in the 3D scatter (default 75).
+
+    Returns
+    -------
+    matplotlib.figure.Figure or None
+        The created figure, or None when ``output_path`` is provided.
+    """
+    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 – registers projection
+
+    epsilon = 1e-10
+    if relative:
+        error = np.abs(numerical - analytical) / (np.abs(analytical) + epsilon)
+        error_label = 'Relative Error'
+    else:
+        error = np.abs(numerical - analytical)
+        error_label = 'Absolute Error'
+
+    ndim = numerical.ndim
+
+    # ------------------------------------------------------------------
+    # 1D: bar3d – height = error at each grid point
+    # ------------------------------------------------------------------
+    if ndim == 1:
+        x = coordinates[0] if isinstance(coordinates, (list, tuple)) else coordinates
+        if x.ndim > 1:
+            x = x.flatten()
+
+        fig = plt.figure(figsize=(10, 6))
+        ax = fig.add_subplot(111, projection='3d')
+
+        dx = (x[-1] - x[0]) / max(len(x) - 1, 1)
+        bar_width = dx * 0.7
+        cmap = plt.get_cmap('hot')
+        norm = colors.Normalize(vmin=0.0, vmax=error.max() if error.max() > 0 else 1.0)
+        bar_colors = cmap(norm(error))
+
+        ax.bar3d(x - bar_width / 2, np.zeros_like(x), np.zeros_like(x),
+                 bar_width, bar_width * 0.5, error,
+                 color=bar_colors, shade=True, alpha=0.9)  # type: ignore[arg-type]
+
+        sm = cm.ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        fig.colorbar(sm, ax=ax, label=error_label, shrink=0.6, pad=0.1)
+
+        ax.set_xlabel('x')
+        ax.set_ylabel('')
+        ax.set_zlabel(error_label)
+        ax.set_yticks([])
+        ax.set_title('3D Error Bar Chart')
+
+    # ------------------------------------------------------------------
+    # 2D: surface + shadow (left) and heatmap (right)
+    # ------------------------------------------------------------------
+    elif ndim == 2:
+        x, y = coordinates
+
+        # Down-sample for rendering performance
+        max_pts = 80
+        sx = max(1, x.shape[0] // max_pts)
+        sy = max(1, x.shape[1] // max_pts)
+        xs = x[::sx, ::sy]
+        ys = y[::sx, ::sy]
+        es = error[::sx, ::sy]
+
+        fig = plt.figure(figsize=(14, 6))
+
+        # -- Left: 3D surface with floor shadow --
+        ax3d = fig.add_subplot(121, projection='3d')
+        norm = colors.Normalize(vmin=0.0, vmax=es.max() if es.max() > 0 else 1.0)
+        surf = ax3d.plot_surface(xs, ys, es, facecolors=plt.get_cmap('hot')(norm(es)),  # type: ignore[call-arg]
+                                 rstride=1, cstride=1, alpha=0.85, linewidth=0,
+                                 antialiased=True)
+        # Floor shadow
+        ax3d.contourf(xs, ys, es, levels=12, zdir='z',
+                      offset=0.0, cmap='hot', alpha=0.4)
+        ax3d.set_zlim(0.0, es.max() * 1.1 if es.max() > 0 else 1.0)
+        ax3d.set_xlabel('x')
+        ax3d.set_ylabel('y')
+        ax3d.set_zlabel(error_label)
+        ax3d.set_title('3D Error Surface')
+
+        sm = cm.ScalarMappable(cmap=plt.get_cmap('hot'), norm=norm)
+        sm.set_array([])
+        fig.colorbar(sm, ax=ax3d, label=error_label, shrink=0.6, pad=0.1)
+
+        # -- Right: top-view heatmap for orientation --
+        ax2d = fig.add_subplot(122)
+        im = ax2d.pcolormesh(x, y, error, shading='auto', cmap='hot')
+        ax2d.set_xlabel('x')
+        ax2d.set_ylabel('y')
+        ax2d.set_title('Top-View Heatmap')
+        ax2d.set_aspect('equal')
+        fig.colorbar(im, ax=ax2d, label=error_label)
+
+    # ------------------------------------------------------------------
+    # 3D: scatter of high-error voxels (left) and histogram (right)
+    # ------------------------------------------------------------------
+    elif ndim == 3:
+        x, y, z = coordinates
+
+        threshold_value = float(np.percentile(error, percentile_threshold))
+        mask = error >= threshold_value
+        xs = x[mask]
+        ys = y[mask]
+        zs = z[mask]
+        es = error[mask]
+
+        fig = plt.figure(figsize=(14, 6))
+
+        # -- Left: 3D scatter of high-error voxels --
+        ax3d = fig.add_subplot(121, projection='3d')
+        norm = colors.Normalize(vmin=threshold_value,
+                                vmax=error.max() if error.max() > threshold_value else threshold_value * 1.1)
+        sc = ax3d.scatter(xs, ys, zs, c=es, cmap='hot', norm=norm,  # type: ignore[call-overload]
+                          s=6, alpha=0.3, depthshade=True)
+        fig.colorbar(sc, ax=ax3d, label=error_label, shrink=0.6, pad=0.1)
+        ax3d.set_xlabel('x')
+        ax3d.set_ylabel('y')
+        ax3d.set_zlabel('z')
+        ax3d.set_title(f'High-Error Voxels\n(≥ {percentile_threshold:.0f}th pctile, '
+                       f'threshold={threshold_value:.2e})')
+
+        # -- Right: error histogram with threshold line --
+        ax_hist = fig.add_subplot(122)
+        ax_hist.hist(error.flatten(), bins=60, color='steelblue', edgecolor='none', alpha=0.75)
+        ax_hist.axvline(threshold_value, color='crimson', linestyle='--', linewidth=1.5,
+                        label=f'{percentile_threshold:.0f}th pctile = {threshold_value:.2e}')
+        ax_hist.set_xlabel(error_label)
+        ax_hist.set_ylabel('Frequency')
+        ax_hist.set_title('Error Distribution')
+        ax_hist.legend()
+        ax_hist.grid(True, alpha=0.3, axis='y')
+
+    else:
+        raise ValueError(f"Unsupported dimensionality: {ndim}")
+
+    fig.suptitle(f'{schema_name} — {scenario_name}: 3D Error Visualization',
+                 fontsize=14, fontweight='bold')
+    plt.tight_layout()
+
+    if output_path:
+        os.makedirs(os.path.dirname(str(output_path)), exist_ok=True)
+        fig.savefig(output_path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        return None
+
     return fig
 
 
