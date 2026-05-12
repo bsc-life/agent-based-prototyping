@@ -51,6 +51,14 @@ class RegionDomain(ABC):
         """
         pass
 
+    def get_bbox_slices(
+        self,
+        axes_1d: List[np.ndarray],
+        dx: Tuple[float, ...]
+    ) -> Tuple[slice, ...]:
+        """Return index slices covering this region's bounding box on the grid."""
+        return tuple(slice(None) for _ in axes_1d)
+
 
 class RectangleRegion(RegionDomain):
     """
@@ -134,6 +142,20 @@ class RectangleRegion(RegionDomain):
                 overlap = overlap * axis_overlap
 
         return overlap
+
+    def get_bbox_slices(
+        self,
+        axes_1d: List[np.ndarray],
+        dx: Tuple[float, ...]
+    ) -> Tuple[slice, ...]:
+        slices = []
+        for d in range(self.ndim):
+            coord_lo = self.origin[d] - dx[d] / 2.0
+            coord_hi = self.origin[d] + self.size[d] + dx[d] / 2.0
+            i_lo = max(0, int(np.searchsorted(axes_1d[d], coord_lo, side='right')) - 1)
+            i_hi = min(len(axes_1d[d]), int(np.searchsorted(axes_1d[d], coord_hi, side='left')) + 1)
+            slices.append(slice(i_lo, i_hi))
+        return tuple(slices)
 
     def __repr__(self) -> str:
         return f"RectangleRegion(origin={self.origin}, size={self.size})"
@@ -290,6 +312,20 @@ class SphereRegion(RegionDomain):
         inside_count = np.sum(r_sq <= self.radius ** 2, axis=1)
         return inside_count / n_total
 
+    def get_bbox_slices(
+        self,
+        axes_1d: List[np.ndarray],
+        dx: Tuple[float, ...]
+    ) -> Tuple[slice, ...]:
+        slices = []
+        for d in range(self.ndim):
+            coord_lo = self.center[d] - self.radius - dx[d] / 2.0
+            coord_hi = self.center[d] + self.radius + dx[d] / 2.0
+            i_lo = max(0, int(np.searchsorted(axes_1d[d], coord_lo, side='right')) - 1)
+            i_hi = min(len(axes_1d[d]), int(np.searchsorted(axes_1d[d], coord_hi, side='left')) + 1)
+            slices.append(slice(i_lo, i_hi))
+        return tuple(slices)
+
     def __repr__(self) -> str:
         return f"SphereRegion(center={self.center}, radius={self.radius})"
 
@@ -419,6 +455,8 @@ class Bulk:
     def __init__(self, regions: Optional[List[Region]] = None):
         self._precomputed = False
         self._regions: List[Region] = list(regions) if regions else []
+        self._raster_cache: dict = {}
+        self._axes_1d: Optional[List[np.ndarray]] = None
 
     # -- region management ------------------------------------------------
 
@@ -450,6 +488,7 @@ class Bulk:
         """
         for i, r in enumerate(self._regions):
             if r.name == name:
+                self._raster_cache.pop(id(r), None)
                 self._regions.pop(i)
                 self._precomputed = False
                 return
@@ -458,6 +497,7 @@ class Bulk:
     def clear_regions(self) -> None:
         """Remove all regions."""
         self._regions = []
+        self._raster_cache.clear()
         self._precomputed = False
 
     @property
@@ -538,7 +578,18 @@ class Bulk:
         with time-dependent rates, by avoiding repeated calls to get_net_rate
         during source computation.
         """
-        
+
+        # Extract 1D axes once; used to compute per-region bounding-box slices.
+        if self._axes_1d is None:
+            ndim = len(coords)
+            if coords[0].ndim == 1:
+                self._axes_1d = list(coords)
+            else:
+                self._axes_1d = [
+                    coords[d][tuple(slice(None) if i == d else 0 for i in range(ndim))]
+                    for d in range(ndim)
+                ]
+
         # Check one by one if any region has a callable rate. 
         # If all are constant, we can skip precomputation after the first time.
         all_constant = True
@@ -562,14 +613,20 @@ class Bulk:
         self._target_cached_rates = np.zeros_like(coords[0])
         self._target_cached_bias = np.zeros_like(coords[0])
         for region in self._regions:
+            region_id = id(region)
+            if region_id not in self._raster_cache:
+                slices = region.domain.get_bbox_slices(self._axes_1d, dx)
+                sub_coords = [c[slices] for c in coords]
+                self._raster_cache[region_id] = (slices, region.domain.rasterize(sub_coords, dx))
+            slices, sub_raster = self._raster_cache[region_id]
+
             if isinstance(region, TargetRegion):
-                rasterization = region.domain.rasterize(coords, dx)
-                self._target_cached_rates += rasterization * region.get_linear_rate(t)
-                self._target_cached_bias += rasterization * region.get_linear_rate(t) * region.get_rho_target(t)
+                self._target_cached_rates[slices] += sub_raster * region.get_linear_rate(t)
+                self._target_cached_bias[slices] += sub_raster * region.get_linear_rate(t) * region.get_rho_target(t)
             elif isinstance(region, LinearRegion):
-                self._linear_cached_rates += region.domain.rasterize(coords, dx) * region.get_linear_rate(t)
-            elif isinstance(region, NetRegion): 
-                self._net_cached_rates += region.domain.rasterize(coords, dx) * region.get_net_rate(t)
+                self._linear_cached_rates[slices] += sub_raster * region.get_linear_rate(t)
+            elif isinstance(region, NetRegion):
+                self._net_cached_rates[slices] += sub_raster * region.get_net_rate(t)
 
 
     def __repr__(self) -> str:
