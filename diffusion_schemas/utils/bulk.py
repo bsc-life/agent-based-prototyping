@@ -51,6 +51,14 @@ class RegionDomain(ABC):
         """
         pass
 
+    def get_bbox_slices(
+        self,
+        axes_1d: List[np.ndarray],
+        dx: Tuple[float, ...]
+    ) -> Tuple[slice, ...]:
+        """Return index slices covering this region's bounding box on the grid."""
+        return tuple(slice(None) for _ in axes_1d)
+
 
 class RectangleRegion(RegionDomain):
     """
@@ -155,6 +163,20 @@ class RectangleRegion(RegionDomain):
             overlap *= np.maximum(overlap_hi - overlap_lo, 0.0) / dx[dim]
 
         return overlap
+
+    def get_bbox_slices(
+        self,
+        axes_1d: List[np.ndarray],
+        dx: Tuple[float, ...]
+    ) -> Tuple[slice, ...]:
+        slices = []
+        for d in range(self.ndim):
+            coord_lo = self.origin[d] - dx[d] / 2.0
+            coord_hi = self.origin[d] + self.size[d] + dx[d] / 2.0
+            i_lo = max(0, int(np.searchsorted(axes_1d[d], coord_lo, side='right')) - 1)
+            i_hi = min(len(axes_1d[d]), int(np.searchsorted(axes_1d[d], coord_hi, side='left')) + 1)
+            slices.append(slice(i_lo, i_hi))
+        return tuple(slices)
 
     def __repr__(self) -> str:
         return f"RectangleRegion(origin={self.origin}, size={self.size})"
@@ -386,6 +408,20 @@ class SphereRegion(RegionDomain):
         inside_count = np.sum(r_sq_samples <= self.radius ** 2, axis=1)
         return inside_count / n_total
 
+    def get_bbox_slices(
+        self,
+        axes_1d: List[np.ndarray],
+        dx: Tuple[float, ...]
+    ) -> Tuple[slice, ...]:
+        slices = []
+        for d in range(self.ndim):
+            coord_lo = self.center[d] - self.radius - dx[d] / 2.0
+            coord_hi = self.center[d] + self.radius + dx[d] / 2.0
+            i_lo = max(0, int(np.searchsorted(axes_1d[d], coord_lo, side='right')) - 1)
+            i_hi = min(len(axes_1d[d]), int(np.searchsorted(axes_1d[d], coord_hi, side='left')) + 1)
+            slices.append(slice(i_lo, i_hi))
+        return tuple(slices)
+
     def __repr__(self) -> str:
         return f"SphereRegion(center={self.center}, radius={self.radius})"
 
@@ -515,6 +551,8 @@ class Bulk:
     def __init__(self, regions: Optional[List[Region]] = None):
         self._precomputed = False
         self._regions: List[Region] = list(regions) if regions else []
+        self._raster_cache: dict = {}
+        self._axes_1d: Optional[List[np.ndarray]] = None
 
     # -- region management ------------------------------------------------
 
@@ -546,6 +584,7 @@ class Bulk:
         """
         for i, r in enumerate(self._regions):
             if r.name == name:
+                self._raster_cache.pop(id(r), None)
                 self._regions.pop(i)
                 self._precomputed = False
                 return
@@ -554,6 +593,7 @@ class Bulk:
     def clear_regions(self) -> None:
         """Remove all regions."""
         self._regions = []
+        self._raster_cache.clear()
         self._precomputed = False
 
     @property
@@ -630,53 +670,24 @@ class Bulk:
     #     """
     #     Precompute net rates for all regions at the current time step.
         
-    #     This can be used to optimize performance if there are many regions
-    #     with time-dependent rates, by avoiding repeated calls to get_net_rate
-    #     during source computation.
-    #     """
-        
-    #     # Check one by one if any region has a callable rate. 
-    #     # If all are constant, we can skip precomputation after the first time.
-    #     all_constant = True
-    #     for region in self._regions:
-    #         if isinstance(region, NetRegion) and callable(region.net_rate):
-    #             all_constant = False
-    #             break
-    #         elif isinstance(region, TargetRegion):
-    #             if callable(region.linear_rate) or callable(region.rho_target):
-    #                 all_constant = False
-    #                 break
-    #         elif isinstance(region, LinearRegion) and callable(region.linear_rate):
-    #             all_constant = False
-    #             break
-    #     if self._precomputed and all_constant:
-    #         return
-    #     self._precomputed = True
+        This can be used to optimize performance if there are many regions
+        with time-dependent rates, by avoiding repeated calls to get_net_rate
+        during source computation.
+        """
 
-    #     self._net_cached_rates = np.zeros_like(coords[0])
-    #     self._linear_cached_rates = np.zeros_like(coords[0])
-    #     self._target_cached_rates = np.zeros_like(coords[0])
-    #     self._target_cached_bias = np.zeros_like(coords[0])
-    #     counter = 0
-    #     import time
-    #     starttime = time.time()
-    #     print("\nStarting rasterization of bulk regions...")
-    #     for region in self._regions: 
-    #         if counter > 0 and counter % 1000 == 0:
-    #             endtime = time.time()
-    #             print(f"Rasterizing region: {counter}. Time taken: {endtime - starttime:.2f} seconds.")
-    #             starttime = time.time()
-    #         counter += 1
-    #         if isinstance(region, TargetRegion):
-    #             rasterization = region.domain.rasterize(coords, dx)
-    #             self._target_cached_rates += rasterization * region.get_linear_rate(t)
-    #             self._target_cached_bias += rasterization * region.get_linear_rate(t) * region.get_rho_target(t)
-    #         elif isinstance(region, LinearRegion):
-    #             self._linear_cached_rates += region.domain.rasterize(coords, dx) * region.get_linear_rate(t)
-    #         elif isinstance(region, NetRegion): 
-    #             self._net_cached_rates += region.domain.rasterize(coords, dx) * region.get_net_rate(t)
+        # Extract 1D axes once; used to compute per-region bounding-box slices.
+        if self._axes_1d is None:
+            ndim = len(coords)
+            if coords[0].ndim == 1:
+                self._axes_1d = list(coords)
+            else:
+                self._axes_1d = [
+                    coords[d][tuple(slice(None) if i == d else 0 for i in range(ndim))]
+                    for d in range(ndim)
+                ]
 
-    def _precompute_rates(self, coords, dx, t) -> None:
+        # Check one by one if any region has a callable rate. 
+        # If all are constant, we can skip precomputation after the first time.
         all_constant = True
         for region in self._regions:
             if isinstance(region, NetRegion) and callable(region.net_rate):
@@ -694,92 +705,26 @@ class Bulk:
             return
         self._precomputed = True
 
-        self._net_cached_rates = np.zeros_like(coords[0], dtype=float)
-        self._linear_cached_rates = np.zeros_like(coords[0], dtype=float)
-        self._target_cached_rates = np.zeros_like(coords[0], dtype=float)
-        self._target_cached_bias = np.zeros_like(coords[0], dtype=float)
+        self._net_cached_rates = np.zeros_like(coords[0])
+        self._linear_cached_rates = np.zeros_like(coords[0])
+        self._target_cached_rates = np.zeros_like(coords[0])
+        self._target_cached_bias = np.zeros_like(coords[0])
+        for region in self._regions:
+            region_id = id(region)
+            if region_id not in self._raster_cache:
+                slices = region.domain.get_bbox_slices(self._axes_1d, dx)
+                sub_coords = [c[slices] for c in coords]
+                self._raster_cache[region_id] = (slices, region.domain.rasterize(sub_coords, dx))
+            slices, sub_raster = self._raster_cache[region_id]
 
-        import time
-        starttime = time.time()
-        print(f"\nGrouping {len(self._regions)} bulk regions for batch processing...")
+            if isinstance(region, TargetRegion):
+                self._target_cached_rates[slices] += sub_raster * region.get_linear_rate(t)
+                self._target_cached_bias[slices] += sub_raster * region.get_linear_rate(t) * region.get_rho_target(t)
+            elif isinstance(region, LinearRegion):
+                self._linear_cached_rates[slices] += sub_raster * region.get_linear_rate(t)
+            elif isinstance(region, NetRegion):
+                self._net_cached_rates[slices] += sub_raster * region.get_net_rate(t)
 
-        # 1. Group regions by shape to batch process rectangles instantly
-        rectangles = []
-        spheres = []
-
-        for r in self._regions:
-            net_rate = r.get_net_rate(t) if isinstance(r, NetRegion) else 0.0
-            lin_rate = r.get_linear_rate(t) if isinstance(r, (LinearRegion, TargetRegion)) else 0.0
-            tgt_rate = r.get_linear_rate(t) if isinstance(r, TargetRegion) else 0.0
-            tgt_bias = tgt_rate * r.get_rho_target(t) if isinstance(r, TargetRegion) else 0.0
-            
-            if isinstance(r.domain, RectangleRegion):
-                rectangles.append((r.domain.origin, r.domain.size, net_rate, lin_rate, tgt_rate, tgt_bias))
-            else:
-                spheres.append((r, net_rate, lin_rate, tgt_rate, tgt_bias))
-
-        # 2. Process rectangles in massive chunks (Vectorized)
-        if rectangles:
-            self._process_rectangle_chunks(rectangles, coords, dx)
-            print(f"Rasterized {len(rectangles)} rectangles in chunks. Total time: {time.time() - starttime:.2f} seconds.")
-
-        # 3. Process spheres individually (Fallback to preserve sub-sampling accuracy)
-        if spheres:
-            print(f"Rasterizing {len(spheres)} spheres individually...")
-            for s_data in spheres:
-                r_obj, net, lin, tgt, bias = s_data
-                mask = r_obj.domain.rasterize(coords, dx)
-                self._net_cached_rates += mask * net
-                self._linear_cached_rates += mask * lin
-                self._target_cached_rates += mask * tgt
-                self._target_cached_bias += mask * bias
-
-    def _process_rectangle_chunks(self, rect_data, coords, dx, chunk_size=1000):
-        """
-        Calculates overlaps for thousands of rectangular regions simultaneously
-        using NumPy broadcasting, drastically reducing Python loop overhead.
-        """
-        # Unpack the list of tuples into fast NumPy arrays
-        origins = np.array([d[0] for d in rect_data], dtype=float)
-        sizes = np.array([d[1] for d in rect_data], dtype=float)
-        nets = np.array([d[2] for d in rect_data], dtype=float)
-        lins = np.array([d[3] for d in rect_data], dtype=float)
-        tgts = np.array([d[4] for d in rect_data], dtype=float)
-        biases = np.array([d[5] for d in rect_data], dtype=float)
-
-        ndim = len(dx)
-        n_regions = len(origins)
-        
-        # Reshape tuple dynamically fits 1D, 2D, or 3D grids
-        # For 3D, this turns a chunk of shape (1000,) into (1000, 1, 1, 1) to broadcast against the grid
-        bc_shape = (-1,) + (1,) * ndim 
-
-        for i in range(0, n_regions, chunk_size):
-            end = min(i + chunk_size, n_regions)
-            chunk_len = end - i
-            
-            # Pre-allocate chunk overlap array: shape (chunk_size, Nx, Ny, Nz)
-            overlap = np.ones((chunk_len,) + coords[0].shape, dtype=float)
-            
-            for dim in range(ndim):
-                c = coords[0] if ndim == 1 else coords[dim]
-                c_exp = c[None, ...] # Expand grid by 1 axis for broadcasting
-                
-                lo = origins[i:end, dim].reshape(bc_shape)
-                hi = (origins[i:end, dim] + sizes[i:end, dim]).reshape(bc_shape)
-                half_dx = dx[dim] / 2.0
-                
-                overlap_lo = np.maximum(c_exp - half_dx, lo)
-                overlap_hi = np.minimum(c_exp + half_dx, hi)
-                
-                overlap *= np.maximum(overlap_hi - overlap_lo, 0.0) / dx[dim]
-                
-            # Collapse the chunk axis (axis=0) and add directly to the global arrays
-            self._net_cached_rates += np.sum(overlap * nets[i:end].reshape(bc_shape), axis=0)
-            self._linear_cached_rates += np.sum(overlap * lins[i:end].reshape(bc_shape), axis=0)
-            self._target_cached_rates += np.sum(overlap * tgts[i:end].reshape(bc_shape), axis=0)
-            self._target_cached_bias += np.sum(overlap * biases[i:end].reshape(bc_shape), axis=0)
-               
 
     def __repr__(self) -> str:
         return f"Bulk(n_regions={len(self._regions)})"
