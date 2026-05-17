@@ -287,6 +287,10 @@ class _CrankNicolsonLODUnified(Schema):
         source_n = self._compute_source_term()
 
         t_next = self.t + self.dt
+        if self._bulk is None and not self._agents and self._boundary_conditions is None:
+            self._step_base()
+            return
+
         agent_source_np1 = self._compute_source_term(implicit=True, t=t_next)
         bulk_rhs_np1 = np.zeros_like(self.state)
         bulk_lhs_np1 = np.zeros_like(self.state)
@@ -935,7 +939,7 @@ class _CrankNicolsonLODUnified(Schema):
             Nx = self.grid_points[0]
             rhs_x = rhs.reshape(Nx, 1)
 
-            if (not has_per_node_source) and (not has_dirichlet) and getattr(self, '_lu_x', None) is not None:
+            if (not has_per_node_source) and (not has_dirichlet) and (not is_neumann) and getattr(self, '_lu_x', None) is not None:
                 self.state = self._lu_x.solve(rhs_x).reshape(self.grid_points)
             else:
                 alpha_x = self.theta * self.dt * self.diffusion_coefficient / (self.dx[0]**2)
@@ -970,7 +974,7 @@ class _CrankNicolsonLODUnified(Schema):
             rhs_2d = rhs.reshape(Nx, Ny)
             
             # --- SWEEP 1: X-Direction ---
-            if (not has_per_node_source) and (not has_dirichlet) and getattr(self, '_lu_x', None) is not None:
+            if (not has_per_node_source) and (not has_dirichlet) and (not is_neumann) and getattr(self, '_lu_x', None) is not None:
                 u_star = self._lu_x.solve(rhs_2d)
             else:
                 alpha_x = self.theta * self.dt * self.diffusion_coefficient / (self.dx[0]**2)
@@ -994,7 +998,7 @@ class _CrankNicolsonLODUnified(Schema):
                 u_star = self._thomas_batched(a_x, b_x, c_x, d_x)
 
             # --- SWEEP 2: Y-Direction ---
-            if (not has_per_node_source) and (not has_dirichlet) and getattr(self, '_lu_y', None) is not None:
+            if (not has_per_node_source) and (not has_dirichlet) and (not is_neumann) and getattr(self, '_lu_y', None) is not None:
                 u_new_T = self._lu_y.solve(u_star.T)
                 self.state = u_new_T.T
             else:
@@ -1026,7 +1030,7 @@ class _CrankNicolsonLODUnified(Schema):
             rhs_3d = rhs.reshape(Nx, Ny, Nz)
             
             # --- SWEEP 1: X-Direction ---
-            if (not has_per_node_source) and (not has_dirichlet) and getattr(self, '_lu_x', None) is not None:
+            if (not has_per_node_source) and (not has_dirichlet) and (not is_neumann) and getattr(self, '_lu_x', None) is not None:
                 rhs_x_flat = rhs_3d.reshape(Nx, Ny * Nz)
                 u_star_flat = self._lu_x.solve(rhs_x_flat)
                 u_star = u_star_flat.reshape(Nx, Ny, Nz)
@@ -1052,7 +1056,7 @@ class _CrankNicolsonLODUnified(Schema):
                 u_star = self._thomas_batched(a_x, b_x, c_x, d_x).reshape(Nx, Ny, Nz)
 
             # --- SWEEP 2: Y-Direction ---
-            if (not has_per_node_source) and (not has_dirichlet) and getattr(self, '_lu_y', None) is not None:
+            if (not has_per_node_source) and (not has_dirichlet) and (not is_neumann) and getattr(self, '_lu_y', None) is not None:
                 u_star_T = u_star.transpose(1, 0, 2).reshape(Ny, Nx * Nz)
                 u_star_star_flat = self._lu_y.solve(u_star_T)
                 u_star_star = u_star_star_flat.reshape(Ny, Nx, Nz).transpose(1, 0, 2)
@@ -1078,7 +1082,7 @@ class _CrankNicolsonLODUnified(Schema):
                 u_star_star = self._thomas_batched(a_y, b_y, c_y, d_y).reshape(Ny, Nx, Nz).transpose(1, 0, 2)
 
             # --- SWEEP 3: Z-Direction ---
-            if (not has_per_node_source) and (not has_dirichlet) and getattr(self, '_lu_z', None) is not None:
+            if (not has_per_node_source) and (not has_dirichlet) and (not is_neumann) and getattr(self, '_lu_z', None) is not None:
                 u_star_star_T = u_star_star.transpose(2, 0, 1).reshape(Nz, Nx * Ny)
                 u_final_flat = self._lu_z.solve(u_star_star_T)
                 self.state = u_final_flat.reshape(Nz, Nx, Ny).transpose(1, 2, 0)

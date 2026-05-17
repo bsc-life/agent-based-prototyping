@@ -768,6 +768,10 @@ class _ImplicitLODUnified(Schema):
     def _step_bci_opt(self) -> None:
         """Perform one LOD time step with integrated BCs."""
         self._ensure_system_matrix_current()
+        # if self._bulk is None and not self._agents and self._boundary_conditions is None:
+        #     self._step_base()
+        #     return
+
         t_next = self.t + self.dt
         
         source_explicit = self._compute_source_term(implicit=True, t=t_next)
@@ -798,7 +802,7 @@ class _ImplicitLODUnified(Schema):
             has_dirichlet = isinstance(self._boundary_conditions, DirichletBC)
             is_neumann = isinstance(self._boundary_conditions, NeumannBC)
 
-            if (not has_per_node_source) and (not has_dirichlet) and getattr(self, '_lu', None) is not None:
+            if (not has_per_node_source) and (not has_dirichlet) and (not is_neumann)and getattr(self, '_lu', None) is not None:
                 # Solve A * u_new = rhs
                 u_new = self._lu.solve(rhs)
                 
@@ -846,7 +850,7 @@ class _ImplicitLODUnified(Schema):
             is_neumann = isinstance(self._boundary_conditions, NeumannBC)
 
             # --- SWEEP 1: X-Direction ---
-            if (not has_per_node_source) and (not has_dirichlet) and getattr(self, '_lu_x', None) is not None:
+            if (not has_per_node_source) and (not has_dirichlet) and (not is_neumann) and getattr(self, '_lu_x', None) is not None:
                 # Solve Ax * U = rhs_2d (all columns at once)
                 u_star = self._lu_x.solve(rhs_2d)
             else:
@@ -871,7 +875,7 @@ class _ImplicitLODUnified(Schema):
                 u_star = self._thomas_batched(a_x, b_x, c_x, d_x)
 
             # --- SWEEP 2: Y-Direction ---
-            if (not has_per_node_source) and (not has_dirichlet) and getattr(self, '_lu_y', None) is not None:
+            if (not has_per_node_source) and (not has_dirichlet) and (not is_neumann) and getattr(self, '_lu_y', None) is not None:
                 # Solve Ay * U_y = u_star.T  -> result has shape (Ny, Nx)
                 u_new_T = self._lu_y.solve(u_star.T)
                 u_new = u_new_T.T
@@ -909,7 +913,7 @@ class _ImplicitLODUnified(Schema):
             decay_term = self.dt * self.decay_rate / 3.0
 
             # --- SWEEP 1: X-Direction ---
-            if (not has_per_node_source) and (not has_dirichlet) and getattr(self, '_lu_x', None) is not None:
+            if (not has_per_node_source) and (not has_dirichlet) and (not is_neumann) and getattr(self, '_lu_x', None) is not None:
                 rhs_x_flat = rhs_x.reshape(Nx, Ny * Nz)
                 u_star_flat = self._lu_x.solve(rhs_x_flat)
                 u_star = u_star_flat.reshape(Nx, Ny, Nz)
@@ -934,7 +938,7 @@ class _ImplicitLODUnified(Schema):
                 u_star = self._thomas_batched(a_x, b_x, c_x, d_x).reshape(Nx, Ny, Nz)
 
             # --- SWEEP 2: Y-Direction ---
-            if (not has_per_node_source) and (not has_dirichlet) and getattr(self, '_lu_y', None) is not None:
+            if (not has_per_node_source) and (not has_dirichlet) and (not is_neumann) and getattr(self, '_lu_y', None) is not None:
                 u_star_T = u_star.transpose(1, 0, 2).reshape(Ny, Nx * Nz)
                 u_star_star_flat = self._lu_y.solve(u_star_T)
                 u_star_star = u_star_star_flat.reshape(Ny, Nx, Nz).transpose(1, 0, 2)
@@ -959,7 +963,7 @@ class _ImplicitLODUnified(Schema):
                 u_star_star = self._thomas_batched(a_y, b_y, c_y, d_y).reshape(Ny, Nx, Nz).transpose(1, 0, 2)
 
             # --- SWEEP 3: Z-Direction ---
-            if (not has_per_node_source) and (not has_dirichlet) and getattr(self, '_lu_z', None) is not None:
+            if (not has_per_node_source) and (not has_dirichlet) and (not is_neumann) and getattr(self, '_lu_z', None) is not None:
                 u_star_star_T = u_star_star.transpose(2, 0, 1).reshape(Nz, Nx * Ny)
                 u_final_flat = self._lu_z.solve(u_star_star_T)
                 u_new = u_final_flat.reshape(Nz, Nx, Ny).transpose(1, 2, 0)
